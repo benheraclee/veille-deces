@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Veille décès Genève</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--ink:#1b2430;--mute:#6b7685;--line:#e3e7ec;--brand:#1f3a5f;--brand2:#2d5486;
+--hi:#b4232c;--hi-bg:#fdecee;--mid:#a86200;--mid-bg:#fff4e0;--lo:#4b5a6b;--lo-bg:#eef1f4;--ok:#1e7a46;--ok-bg:#e6f5ec}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+header{background:var(--brand);color:#fff;padding:12px 20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{background:transparent;border:0;color:#c9d6e6;padding:7px 12px;border-radius:6px;cursor:pointer;font:inherit;font-weight:500}
+nav button.on,nav button:hover{background:rgba(255,255,255,.14);color:#fff}
+header .droite{margin-left:auto;font-size:12px;color:#c9d6e6;display:flex;gap:12px;align-items:center}
+header .droite a{color:#fff;cursor:pointer}
+main{max-width:1250px;margin:0 auto;padding:18px 16px 60px}
+.barre{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+input,select,textarea{font:inherit;border:1px solid var(--line);border-radius:6px;padding:7px 9px;background:#fff;color:var(--ink)}
+input[type=search]{min-width:220px}
+button.btn{font:inherit;font-weight:600;border:0;border-radius:6px;padding:8px 14px;background:var(--brand);color:#fff;cursor:pointer}
+button.btn:disabled{opacity:.5}
+button.sec{background:#fff;color:var(--brand);border:1px solid var(--line)}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-width:120px}
+.stat b{display:block;font-size:20px}
+.stat span{color:var(--mute);font-size:12px}
+.piste{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px;display:grid;grid-template-columns:62px 1fr 1fr 230px;gap:14px}
+.piste.ecarte{opacity:.55}
+.score{font-size:22px;font-weight:700;text-align:center;border-radius:8px;padding:8px 0}
+.s-hi{background:var(--hi-bg);color:var(--hi)}.s-mid{background:var(--mid-bg);color:var(--mid)}.s-lo{background:var(--lo-bg);color:var(--lo)}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--mute);margin-bottom:3px}
+.nom{font-weight:600;font-size:15px}
+.mute{color:var(--mute);font-size:12.5px}
+.tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:10px;background:var(--lo-bg);color:var(--lo);margin:2px 4px 0 0}
+.tag.def{background:var(--hi-bg);color:var(--hi)}.tag.fam{background:var(--mid-bg);color:var(--mid)}.tag.com{background:var(--ok-bg);color:var(--ok)}
+.extrait{font-style:italic;color:var(--mute);font-size:12.5px;margin-top:5px}
+.liens a{font-size:12.5px;margin-right:10px;color:var(--brand2)}
+.suivi select,.suivi textarea{width:100%;margin-bottom:6px}
+.suivi textarea{min-height:52px;resize:vertical;font-size:12.5px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:#eef1f5;font-size:12px;color:var(--mute);font-weight:600}
+.carte{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:14px}
+.drop{border:2px dashed #b9c4d2;border-radius:10px;padding:34px;text-align:center;color:var(--mute);cursor:pointer;background:#fafbfc}
+.drop.sur{border-color:var(--brand2);background:#eef3fa}
+.prog{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:10px 0}
+.prog div{height:100%;background:var(--brand2);width:0;transition:width .2s}
+#login{max-width:360px;margin:12vh auto;background:#fff;border:1px solid var(--line);border-radius:12px;padding:26px}
+#login h2{margin:0 0 16px;font-size:18px}
+#login input{width:100%;margin-bottom:10px}
+.err{color:var(--hi);font-size:13px;min-height:18px}
+.vide{text-align:center;color:var(--mute);padding:40px}
+.cache{display:none!important}
+@media (max-width:900px){.piste{grid-template-columns:52px 1fr}.piste .suivi{grid-column:1/-1}.piste>div:nth-child(3){grid-column:2}}
+</style>
+</head>
+<body>
+
+<div id="login" class="cache">
+  <h2>Veille décès — connexion</h2>
+  <input id="email" type="email" placeholder="E-mail" autocomplete="username">
+  <input id="mdp" type="password" placeholder="Mot de passe" autocomplete="current-password">
+  <div class="err" id="loginErr"></div>
+  <button class="btn" style="width:100%" onclick="connexion()">Se connecter</button>
+</div>
+
+<div id="app" class="cache">
+<header>
+  <h1>Veille décès × propriétaires — Genève</h1>
+  <nav>
+    <button data-v="pistes" class="on">Pistes</button>
+    <button data-v="avis">Avis</button>
+    <button data-v="base">Base</button>
+    <button data-v="import">Import Popety</button>
+    <button data-v="robot">Robot</button>
+  </nav>
+  <div class="droite"><span id="qui"></span><a onclick="changerMdp()">Mot de passe</a><a onclick="deconnexion()">Déconnexion</a></div>
+</header>
+<main>
+
+<section id="v-pistes">
+  <div class="stats" id="statsPistes"></div>
+  <div class="barre">
+    <select id="fStatut"><option value="">Tous statuts</option><option selected value="actifs">À traiter (hors écartés)</option>
+      <option>à vérifier</option><option>confirmé</option><option>contacté</option><option>écarté</option></select>
+    <select id="fNiveau"><option value="">Tous niveaux</option><option value="DÉFUNT">Défunt propriétaire</option>
+      <option value="FAMILLE">Famille citée</option><option value="MÊME NOM">Même nom</option></select>
+    <select id="fScore"><option value="0">Tout score</option><option value="50" selected>Score ≥ 50</option><option value="75">Score ≥ 75</option></select>
+    <select id="fCommune"><option value="">Toutes communes</option></select>
+    <input type="search" id="fTexte" placeholder="Nom, adresse, parcelle…">
+    <button class="btn sec" onclick="chargerPistes()">Actualiser</button>
+  </div>
+  <div id="listePistes"></div>
+</section>
+
+<section id="v-avis" class="cache">
+  <div class="barre">
+    <select id="aJours"><option value="7">7 jours</option><option value="30" selected>30 jours</option><option value="90">90 jours</option></select>
+    <select id="aSource"><option value="">Toutes sources</option><option>hommages</option><option>funere</option></select>
+    <input type="search" id="aTexte" placeholder="Nom, commune…">
+  </div>
+  <div id="listeAvis"></div>
+</section>
+
+<section id="v-base" class="cache">
+  <div class="stats" id="statsBase"></div>
+  <div class="barre">
+    <input type="search" id="bTexte" placeholder="Nom de propriétaire (min. 3 lettres)" style="min-width:300px">
+    <select id="bCommune"><option value="">Toutes communes</option></select>
+    <input id="bNumero" placeholder="N° parcelle" style="width:110px">
+    <button class="btn" onclick="chercherBase()">Chercher</button>
+  </div>
+  <div id="listeBase"></div>
+</section>
+
+<section id="v-import" class="cache">
+  <div class="carte">
+    <div class="lbl">Mettre à jour la base</div>
+    <p class="mute" style="margin-top:0">Glisser ici les exports Popety (.xlsx), autant qu'il faut. Les parcelles déjà présentes sont mises à jour,
+      les doublons entre fichiers sont ignorés. Les sociétés et institutions sont exclues automatiquement.</p>
+    <div class="drop" id="drop">Déposer les fichiers .xlsx ici ou cliquer pour choisir<input type="file" id="fichiers" multiple accept=".xlsx" class="cache"></div>
+    <div id="importEtat" class="mute" style="margin-top:12px"></div>
+    <div class="prog cache" id="prog"><div></div></div>
+  </div>
+</section>
+
+<section id="v-robot" class="cache">
+  <div class="carte">
+    <div class="lbl">Robot</div>
+    <p style="margin-top:0">Le robot lit hommages.ch et funere.com chaque matin à 7h10, lit le texte des avis et compare à la base.
+      Pour lancer un passage tout de suite : <a id="lienActions" target="_blank">GitHub → Actions → Veille décès → Run workflow</a>.</p>
+  </div>
+  <div id="listePassages"></div>
+</section>
+
+</main>
+</div>
+
+<script>
+const SUPABASE_URL = "https://wpnsxibjsstnvroovehm.supabase.co";
+const SUPABASE_KEY = "sb_publishable_2XSiYH_Sv4Jub7_i-9TcdA_cGfvQS7N";
+const REPO_ACTIONS = "https://github.com/OWNER/REPO/actions/workflows/veille.yml";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fdate = d => d ? new Date(d).toLocaleDateString("fr-CH") : "";
+const fnum = n => n == null ? "" : Number(n).toLocaleString("fr-CH");
+const sansAcc = s => String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
+let PISTES = [];
+
+// ---------------- auth
+async function init(){
+  const { data:{ session } } = await sb.auth.getSession();
+  if (session) ouvrir(session.user); else $("login").classList.remove("cache");
+}
+async function connexion(){
+  $("loginErr").textContent = "";
+  const { data, error } = await sb.auth.signInWithPassword({ email:$("email").value.trim(), password:$("mdp").value });
+  if (error) { $("loginErr").textContent = "Identifiants incorrects."; return; }
+  ouvrir(data.user);
+}
+$("mdp").addEventListener("keydown", e => e.key === "Enter" && connexion());
+async function deconnexion(){ await sb.auth.signOut(); location.reload(); }
+async function changerMdp(){
+  const p = prompt("Nouveau mot de passe (8 caractères minimum) :");
+  if (!p) return;
+  if (p.length < 8) return alert("Trop court.");
+  const { error } = await sb.auth.updateUser({ password:p });
+  alert(error ? "Erreur : " + error.message : "Mot de passe modifié.");
+}
+function ouvrir(user){
+  $("login").classList.add("cache"); $("app").classList.remove("cache");
+  $("qui").textContent = user.email;
+  $("lienActions").href = REPO_ACTIONS;
+  chargerCommunes(); chargerPistes();
+}
+
+// ---------------- navigation
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll("main section").forEach(s => s.classList.toggle("cache", s.id !== "v-" + b.dataset.v));
+  ({ pistes:chargerPistes, avis:chargerAvis, base:statsBase, robot:chargerPassages })[b.dataset.v]?.();
+});
+
+async function chargerCommunes(){
+  const { data } = await sb.rpc("liste_communes");
+  const opts = (data||[]).map(c => `<option>${esc(c.commune)}</option>`).join("");
+  $("fCommune").insertAdjacentHTML("beforeend", opts);
+  $("bCommune").insertAdjacentHTML("beforeend", opts);
+}
+
+// ---------------- pistes
+async function chargerPistes(){
+  $("listePistes").innerHTML = '<div class="vide">Chargement…</div>';
+  const { data, error } = await sb.from("v_correspondances").select("*").order("cree_le", { ascending:false }).limit(2000);
+  if (error) { $("listePistes").innerHTML = `<div class="vide">Erreur : ${esc(error.message)}</div>`; return; }
+  PISTES = data;
+  const n = s => data.filter(d => d.statut === s).length;
+  $("statsPistes").innerHTML = [
+    ["Pistes", data.length], ["À vérifier", n("à vérifier")], ["Confirmées", n("confirmé")], ["Contactées", n("contacté")],
+    ["Défunt propriétaire", data.filter(d => d.niveau.startsWith("DÉFUNT") && d.statut !== "écarté").length]
+  ].map(([l,v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+  afficherPistes();
+}
+["fStatut","fNiveau","fScore","fCommune"].forEach(id => $(id).onchange = afficherPistes);
+$("fTexte").oninput = afficherPistes;
+
+function afficherPistes(){
+  const st = $("fStatut").value, nv = $("fNiveau").value, sc = +$("fScore").value, co = $("fCommune").value, q = sansAcc($("fTexte").value);
+  const l = PISTES.filter(p =>
+    (!st || (st === "actifs" ? p.statut !== "écarté" : p.statut === st)) &&
+    (!nv || p.niveau.startsWith(nv)) && p.score >= sc && (!co || p.commune === co) &&
+    (!q || sansAcc([p.avis_nom,p.nom,p.prenoms,p.adresse,p.numero,p.commune].join(" ")).includes(q))
+  ).sort((a,b) => b.score - a.score || new Date(b.cree_le) - new Date(a.cree_le));
+  if (!l.length) { $("listePistes").innerHTML = '<div class="vide">Aucune piste avec ces filtres.</div>'; return; }
+  $("listePistes").innerHTML = l.map(p => {
+    const cls = p.score >= 75 ? "s-hi" : p.score >= 50 ? "s-mid" : "s-lo";
+    const tcls = p.niveau.startsWith("DÉFUNT") ? "def" : p.niveau.startsWith("FAMILLE") ? "fam" : "";
+    const src = p.source === "funere" ? "funere.com" : (p.journaux||[]).join(", ") || "hommages.ch";
+    return `<div class="piste ${p.statut === "écarté" ? "ecarte" : ""}">
+      <div class="score ${cls}">${p.score}</div>
+      <div>
+        <div class="lbl">Avis de décès</div>
+        <div class="nom">${esc(p.avis_nom)}</div>
+        <div class="mute">${[p.age ? p.age + " ans" : "", p.avis_commune, fdate(p.date_deces || p.date_publication), src].filter(Boolean).map(esc).join(" · ")}</div>
+        <div><span class="tag ${tcls}">${esc(p.niveau)}</span>${p.commune_citee ? `<span class="tag com">Commune : ${esc(p.commune_citee)}</span>` : ""}</div>
+        ${p.extrait && p.extrait !== p.avis_nom ? `<div class="extrait">« ${esc(p.extrait)} »</div>` : ""}
+        <div class="liens" style="margin-top:6px"><a href="${esc(p.avis_url)}" target="_blank">Ouvrir l'avis</a></div>
+      </div>
+      <div>
+        <div class="lbl">Propriétaire inscrit</div>
+        <div class="nom">${esc(p.nom)} <span style="font-weight:400">${esc(p.prenoms)}</span></div>
+        <div class="mute">${esc(p.commune)} — parcelle n° ${esc(p.numero)}<br>${esc(p.adresse || "sans adresse")}<br>
+          ${fnum(p.surface)} m² · zone ${esc(p.zone)} · ${p.nb_proprietaires} propriétaire(s)</div>
+        <div class="liens" style="margin-top:6px">${p.rf_url ? `<a href="${esc(p.rf_url)}" target="_blank">Registre foncier</a>` : ""}
+          ${p.map_url ? `<a href="${esc(p.map_url)}" target="_blank">Carte</a>` : ""}</div>
+      </div>
+      <div class="suivi">
+        <div class="lbl">Suivi</div>
+        <select onchange="majPiste(${p.id},{statut:this.value})">${["à vérifier","confirmé","contacté","écarté"].map(s => `<option ${s===p.statut?"selected":""}>${s}</option>`).join("")}</select>
+        <textarea placeholder="Notes…" onchange="majPiste(${p.id},{notes:this.value})">${esc(p.notes)}</textarea>
+      </div>
+    </div>`;
+  }).join("");
+}
+async function majPiste(id, champs){
+  const { error } = await sb.from("correspondances").update({ ...champs, maj_le:new Date().toISOString() }).eq("id", id);
+  if (error) return alert("Erreur : " + error.message);
+  Object.assign(PISTES.find(p => p.id === id), champs);
+  if ("statut" in champs) afficherPistes();
+}
+
+// ---------------- avis
+let AVIS = [];
+async function chargerAvis(){
+  $("listeAvis").innerHTML = '<div class="vide">Chargement…</div>';
+  const depuis = new Date(Date.now() - $("aJours").value * 864e5).toISOString().slice(0,10);
+  const { data, error } = await sb.from("avis").select("id,source,nom,url,date_publication,date_deces,age,commune,journaux,correspondances(count)")
+    .gte("lu_le", depuis).order("lu_le", { ascending:false }).limit(3000);
+  if (error) { $("listeAvis").innerHTML = `<div class="vide">${esc(error.message)}</div>`; return; }
+  AVIS = data; afficherAvis();
+}
+["aJours"].forEach(id => $(id).onchange = chargerAvis);
+$("aSource").onchange = afficherAvis; $("aTexte").oninput = afficherAvis;
+function afficherAvis(){
+  const s = $("aSource").value, q = sansAcc($("aTexte").value);
+  const l = AVIS.filter(a => (!s || a.source === s) && (!q || sansAcc(a.nom + " " + a.commune).includes(q)));
+  if (!l.length) { $("listeAvis").innerHTML = '<div class="vide">Aucun avis sur cette période.</div>'; return; }
+  $("listeAvis").innerHTML = `<p class="mute">${l.length} avis</p><table><tr><th>Défunt</th><th>Âge</th><th>Commune</th><th>Date</th><th>Source</th><th>Pistes</th></tr>` +
+    l.map(a => { const n = a.correspondances?.[0]?.count || 0;
+      return `<tr><td><a href="${esc(a.url)}" target="_blank">${esc(a.nom)}</a></td><td>${a.age ?? ""}</td><td>${esc(a.commune)}</td>
+      <td>${fdate(a.date_deces || a.date_publication)}</td><td>${esc(a.source === "funere" ? "funere" : (a.journaux||[]).join(", ") || "hommages")}</td>
+      <td>${n ? `<span class="tag def">${n}</span>` : ""}</td></tr>`; }).join("") + "</table>";
+}
+
+// ---------------- base
+async function statsBase(){
+  const [{ count:np }, { count:nr }] = await Promise.all([
+    sb.from("parcelles").select("id", { count:"exact", head:true }),
+    sb.from("proprietaires").select("id", { count:"exact", head:true })]);
+  $("statsBase").innerHTML = `<div class="stat"><b>${fnum(np)}</b><span>Parcelles</span></div><div class="stat"><b>${fnum(nr)}</b><span>Lignes propriétaire</span></div>`;
+}
+$("bTexte").addEventListener("keydown", e => e.key === "Enter" && chercherBase());
+async function chercherBase(){
+  const q = $("bTexte").value.trim(), co = $("bCommune").value, nu = $("bNumero").value.trim();
+  if (q.length < 3 && !nu && !co) return;
+  let req = sb.from("proprietaires").select("nom,prenoms,parcelles!inner(id,commune,numero,adresse,surface,zone,nb_proprietaires,rf_url,map_url)").limit(300);
+  if (q.length >= 3) req = req.ilike("nom", `%${q}%`);
+  if (co) req = req.eq("parcelles.commune", co);
+  if (nu) req = req.eq("parcelles.numero", nu);
+  const { data, error } = await req;
+  if (error) { $("listeBase").innerHTML = esc(error.message); return; }
+  $("listeBase").innerHTML = data.length ? `<table><tr><th>Propriétaire</th><th>Commune</th><th>N°</th><th>Adresse</th><th>Surface</th><th>Zone</th><th>Propr.</th><th></th></tr>` +
+    data.map(r => { const p = r.parcelles; return `<tr><td><b>${esc(r.nom)}</b> ${esc(r.prenoms)}</td><td>${esc(p.commune)}</td><td>${esc(p.numero)}</td>
+      <td>${esc(p.adresse)}</td><td>${fnum(p.surface)} m²</td><td>${esc(p.zone)}</td><td>${p.nb_proprietaires}</td>
+      <td class="liens">${p.rf_url ? `<a href="${esc(p.rf_url)}" target="_blank">RF</a>` : ""}${p.map_url ? `<a href="${esc(p.map_url)}" target="_blank">Carte</a>` : ""}</td></tr>`; }).join("") + "</table>"
+    : '<div class="vide">Aucun résultat.</div>';
+}
+
+// ---------------- import Popety
+const UP = "A-ZÀ-ÖØ-ÞŒ", LO = "a-zß-öø-ÿœ";
+const PERSONNE = new RegExp(`((?:[${UP}][${UP}'’\\-]*(?:\\s+|$))+?)((?:(?:[${UP}][${LO}'’\\-]+(?:-[${UP}][${LO}'’\\-]+)*|dite?|née?)(?:\\s+|$))+)`, "g");
+const ENTITES = /(?<![A-ZÀ-Þ])(SA|AG|GMBH|SÀRL|SARL|SCI|SNC|COMMUNE|FONDATION|CAISSE|CONFEDERATION|CONFÉDÉRATION|CIEPP|ETAT|ÉTAT|SOCIETE|SOCIÉTÉ|ASSOCIATION|COOPERATIVE|COOPÉRATIVE|PAROISSE|EGLISE|ÉGLISE|IMMOBILIERE|IMMOBILIÈRE|HOLDING|FTI|PPE|BANQUE|CREDIT|CRÉDIT|ASSURANCE|ASSURANCES|FONDS|RETRAITE|HOSPICE|VILLE|CANTON|REPUBLIQUE|RÉPUBLIQUE|HOIRIE|PREVOYANCE|PRÉVOYANCE|INVEST|INVESTMENTS|PROPERTIES|REAL|ESTATE|LIMITED|LTD|INC|TRUST|CONSORTS|COMMUNAUTE|COMMUNAUTÉ|CFF|SIG|HUG|UNIVERSITE|UNIVERSITÉ|MISSION|CONGREGATION|CONGRÉGATION|FEDERATION|FÉDÉRATION|OFFICE|SERVICES|GROUP|GROUPE)(?![A-ZÀ-Þ])/;
+function decouper(brut){
+  if (!brut) return [];
+  const s = String(brut).replace(/Immeuble principal\s+\S+|Parts? de copropriété\s+\S*/gi, " ");
+  const out = [];
+  for (const m of s.matchAll(PERSONNE)) {
+    let nom = m[1].trim(), prenoms = m[2].trim(), surnom = "";
+    if (/\b(POUR|CONTRE|ET|DES|DU)\b/.test(nom) && nom.split(/\s+/).length > 4) nom = nom.split(/\s+/).pop();
+    if (ENTITES.test(nom) || nom.length < 2) continue;
+    const d = prenoms.match(/\bdite?\s+(.+)$/);
+    if (d) { surnom = d[1].trim(); prenoms = prenoms.slice(0, d.index).trim(); }
+    out.push({ nom, prenoms, surnom });
+  }
+  return out;
+}
+const drop = $("drop");
+drop.onclick = () => $("fichiers").click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("sur"); };
+drop.ondragleave = () => drop.classList.remove("sur");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("sur"); importer([...e.dataTransfer.files]); };
+$("fichiers").onchange = e => importer([...e.target.files]);
+
+async function importer(files){
+  files = files.filter(f => /\.xlsx$/i.test(f.name));
+  if (!files.length) return;
+  const etat = t => $("importEtat").innerHTML = t, prog = $("prog"), barre = prog.firstElementChild;
+  prog.classList.remove("cache"); barre.style.width = "0";
+  const parcelles = new Map(); let ignores = 0;
+  for (const [i,f] of files.entries()) {
+    etat(`Lecture ${i+1}/${files.length} : ${esc(f.name)}`);
+    const wb = XLSX.read(await f.arrayBuffer());
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:null });
+    if (!rows.length || !("Propriétaire(s)" in rows[0])) { ignores++; continue; }
+    rows.forEach(r => r["Parcelle"] && parcelles.set(Number(r["Parcelle"]), r));
+  }
+  const lignesP = [], lignesO = [];
+  for (const [id, r] of parcelles) {
+    const pers = decouper(r["Propriétaire(s)"]), n = pers.length;
+    lignesP.push({ id, commune:r["Commune"], numero:String(r["Numéro parcelle"] ?? ""), adresse:r["Adresse principale"],
+      surface:r["Surface"], zone:r["Zone d'affectation principale"] != null ? String(r["Zone d'affectation principale"]) : null,
+      nb_proprietaires:n, priorite: n >= 1 && n <= 2 ? "haute" : n <= 5 && n > 0 ? "moyenne" : "basse",
+      rf_url:r["Registre Foncier"], map_url:r["Google Map"], proprietaires_brut:r["Propriétaire(s)"], maj_le:new Date().toISOString() });
+    pers.forEach(p => lignesO.push({ parcelle_id:id, ...p }));
+  }
+  etat(`${files.length - ignores} fichiers, ${fnum(lignesP.length)} parcelles, ${fnum(lignesO.length)} propriétaires — envoi…`);
+  const total = lignesP.length; let fait = 0;
+  try {
+    for (let i = 0; i < lignesP.length; i += 500) {
+      const lot = lignesP.slice(i, i + 500), ids = lot.map(p => p.id);
+      let r = await sb.from("parcelles").upsert(lot, { onConflict:"id" }); if (r.error) throw r.error;
+      r = await sb.from("proprietaires").delete().in("parcelle_id", ids); if (r.error) throw r.error;
+      const own = lignesO.filter(o => ids.includes(o.parcelle_id));
+      for (let j = 0; j < own.length; j += 1000) { r = await sb.from("proprietaires").insert(own.slice(j, j + 1000)); if (r.error) throw r.error; }
+      fait += lot.length; barre.style.width = (100 * fait / total) + "%";
+      etat(`Envoi : ${fnum(fait)} / ${fnum(total)} parcelles`);
+    }
+    etat(`<b>Import terminé</b> — ${fnum(total)} parcelles, ${fnum(lignesO.length)} propriétaires personnes physiques` +
+      (ignores ? ` — ${ignores} fichier(s) ignoré(s) (pas un export Popety)` : ""));
+  } catch (e) { etat(`<span class="err">Erreur : ${esc(e.message)}</span> — relancer l'import, les parcelles déjà envoyées seront simplement mises à jour.`); }
+}
+
+// ---------------- robot
+async function chargerPassages(){
+  const { data } = await sb.from("passages").select("*").order("debut", { ascending:false }).limit(30);
+  $("listePassages").innerHTML = data?.length ? `<table><tr><th>Début</th><th>Statut</th><th>Nouveaux avis</th><th>Pistes</th><th>Message</th></tr>` +
+    data.map(p => `<tr><td>${new Date(p.debut).toLocaleString("fr-CH")}</td><td>${p.statut === "ok" ? '<span class="tag com">ok</span>' : `<span class="tag def">${esc(p.statut)}</span>`}</td>
+      <td>${p.nb_avis ?? ""}</td><td>${p.nb_correspondances ?? ""}</td><td class="mute">${esc(p.message)}</td></tr>`).join("") + "</table>"
+    : '<div class="vide">Aucun passage pour l\'instant.</div>';
+}
+
+init();
+</script>
+</body>
+</html>
