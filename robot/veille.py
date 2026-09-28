@@ -110,6 +110,56 @@ def sb_patch(table, id_, row):
     requests.patch(f"{SB_URL}/rest/v1/{table}?id=eq.{id_}", headers=SB, data=json.dumps(row, default=str), timeout=30)
 
 
+def debug(cle, contenu):
+    try:
+        requests.post(f"{SB_URL}/rest/v1/debug", headers=SB, data=json.dumps({"cle": cle, "contenu": str(contenu)[:60000]}), timeout=30)
+    except Exception:
+        pass
+
+
+def slugs_hommages(html):
+    return [m for m in re.findall(r'/fr/avis-de-deces/([a-z0-9\-]+)"', html)][:5]
+
+
+def diagnostic_hommages():
+    base = "https://www.hommages.ch/fr/avis-de-deces"
+    r1 = get(base)
+    if not r1:
+        debug("hommages_p1", "échec")
+        return
+    soup = BeautifulSoup(r1.text, "html.parser")
+    liens = sorted({a["href"] for a in soup.find_all("a", href=True) if "page" in a["href"] or "?" in a["href"]})
+    forms = [str(f)[:4000] for f in soup.find_all("form")]
+    btns = [str(b)[:300] for b in soup.find_all(["button", "nav"]) if re.search(r"page|suiv|next|plus", b.get_text(" ", strip=True) + str(b.attrs), re.I)][:20]
+    scripts = [sc.get("src") for sc in soup.find_all("script") if sc.get("src")]
+    debug("hommages_p1", json.dumps({"slugs": slugs_hommages(r1.text), "liens": liens[:80], "forms": forms,
+                                     "boutons": btns, "scripts": scripts, "taille": len(r1.text)}, ensure_ascii=False))
+    idx = r1.text.find("page=2")
+    debug("hommages_p1_autour_page2", r1.text[max(0, idx - 3000): idx + 1500] if idx >= 0 else "pas de page=2")
+    j = r1.text.find("avis-de-deces/")
+    debug("hommages_p1_bloc_avis", r1.text[max(0, j - 1500): j + 2500])
+    hier = (AUJ - dt.timedelta(days=12)).strftime("%d.%m.%Y")
+    for v in ["?page=2", "?page=3", "?p=2", f"?from={hier}&to={hier}", f"?page=1&from={hier}&to={hier}",
+              f"?name=&newspaper=&from={hier}&to={hier}"]:
+        r = get(base + v)
+        debug("hommages_variante", f"{v} -> {r.status_code if r else 'x'} {slugs_hommages(r.text) if r else ''}")
+        time.sleep(1)
+
+
+def diagnostic_funere():
+    u = "https://www.funere.com/ch-fr/avis-de-deces/geneve"
+    try:
+        r = WEB.get(u, timeout=40)
+        soup = BeautifulSoup(r.text, "html.parser")
+        hrefs = [a["href"] for a in soup.find_all("a", href=True) if "avis-de-deces" in a["href"]][:30]
+        debug("funere", json.dumps({"status": r.status_code, "taille": len(r.text), "hrefs": hrefs,
+                                    "texte": soup.get_text(" ", strip=True)[:3000]}, ensure_ascii=False))
+        j = r.text.find("/avis-de-deces/geneve/")
+        debug("funere_html", r.text[max(0, j - 1500): j + 3000])
+    except Exception as e:
+        debug("funere", f"exception {e}")
+
+
 # ------------------------------------------------------------ base propriétaires
 class Base:
     def __init__(self):
@@ -125,9 +175,19 @@ class Base:
             if p["S"]:
                 self.pers.append(p)
                 freq[" ".join(p["S"])] += 1
+        prenoms_freq = defaultdict(int)
+        for p in self.pers:
+            for t in set(p["F"]):
+                prenoms_freq[t] += 1
+        MOTS = {"compagnon", "compagne", "petite", "petit", "fils", "fille", "ami", "amie", "frere", "soeur", "mari",
+                "epoux", "epouse", "famille", "maman", "papa", "grand", "mere", "pere", "bon", "bonne", "belle", "beau",
+                "jeune", "vieux", "blanc", "noir", "rouge", "vert", "leur", "leurs", "tout", "tous", "ainsi", "amis",
+                "dieu", "paix", "coeur", "vie", "juste", "douce", "cher", "chere", "saint", "sainte", "roi", "comte"}
         self.index = defaultdict(list)
         for p in self.pers:
             p["homonymes"] = freq[" ".join(p["S"])]
+            # nom de famille qui est aussi un prénom courant ou un mot courant -> ambigu dans un texte
+            p["ambigu"] = len(p["S"]) == 1 and (prenoms_freq[p["S"][0]] >= 15 or p["S"][0] in MOTS)
             self.index[p["S"][0]].append(p)
         print(f"Base : {len(self.pers)} lignes propriétaire")
 
@@ -150,15 +210,17 @@ def meme_commune(p, commune_avis):
 def analyser(base, avis):
     res, vus = [], set()
     N = tok(avis["nom"])
+    mots = avis["nom"].split()
+    k = len(tok(mots[0])) if mots else 1  # nb de tokens du 1er mot (prénom, éventuellement composé)
     for p, pos in base.candidats(N):
-        if pos == 0:
+        if pos < k:  # le nom trouvé fait partie du prénom (ex. "Valerio Pavesi", "Hans-Conrad Kessler")
             continue
-        autres = N[:pos] + N[pos + len(p["S"]):]
+        autres = N[:pos]  # les prénoms précèdent le nom
         if p["F1"] and p["F1"] in autres:
             niv, sc = "DÉFUNT — nom + 1er prénom", 90
         elif any(f in autres for f in p["F"]):
-            niv, sc = "DÉFUNT — nom + prénom secondaire", 75
-        elif p["homonymes"] <= 2 and len("".join(p["S"])) >= 6:
+            niv, sc = "DÉFUNT — nom + prénom secondaire", 60
+        elif p["homonymes"] <= 2 and len("".join(p["S"])) >= 6 and not p["ambigu"]:
             niv, sc = "MÊME NOM — nom rare, autre prénom", 40
         else:
             continue
@@ -166,7 +228,7 @@ def analyser(base, avis):
         vus.add(p["id"])
     T = tok(avis.get("texte"))
     for p, pos in base.candidats(T):
-        if p["id"] in vus or len("".join(p["S"])) < 4:
+        if p["id"] in vus or len("".join(p["S"])) < 4 or p["ambigu"]:
             continue
         fen = T[max(0, pos - 6):pos] + T[pos + len(p["S"]):pos + len(p["S"]) + 4]
         if p["F1"] and p["F1"] in fen:
@@ -334,6 +396,9 @@ def mail(nouvelles):
 # ------------------------------------------------------------ main
 def main():
     passage = sb_insert("passages", {"source": "hommages+funere", "statut": "en cours"})
+    if os.environ.get("DIAGNOSTIC") == "1":
+        diagnostic_hommages()
+        diagnostic_funere()
     try:
         base = Base()
         existants = sb_get_all("avis", "source,slug", f"&lu_le=gte.{(AUJ - dt.timedelta(days=JOURS + 10)).isoformat()}")

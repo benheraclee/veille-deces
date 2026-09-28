@@ -8,6 +8,9 @@ on:
       jours:
         description: "Nombre de jours à analyser"
         default: "3"
+      diagnostic:
+        description: "Diagnostic (1 = oui)"
+        default: "0"
 
 jobs:
   veille:
@@ -27,6 +30,7 @@ jobs:
           SUPABASE_URL: https://wpnsxibjsstnvroovehm.supabase.co
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           JOURS: ${{ github.event.inputs.jours || '3' }}
+          DIAGNOSTIC: ${{ github.event.inputs.diagnostic || '0' }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
