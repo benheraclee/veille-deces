@@ -28,7 +28,9 @@ WEB.headers.update({"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_
                                   "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
                     "Accept-Language": "fr-CH,fr;q=0.9"})
 AUJ = dt.date.today()
-LIMITE = AUJ - dt.timedelta(days=JOURS)
+DATE_FIN = dt.date.fromisoformat(os.environ["DATE_FIN"]) if os.environ.get("DATE_FIN") else AUJ
+DATE_DEBUT = dt.date.fromisoformat(os.environ["DATE_DEBUT"]) if os.environ.get("DATE_DEBUT") else DATE_FIN - dt.timedelta(days=JOURS)
+LIMITE = DATE_DEBUT
 
 MOIS = {"janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6, "juillet": 7, "aout": 8,
         "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12}
@@ -268,111 +270,115 @@ def ocr(data):
 
 
 # ------------------------------------------------------------ sources
-def hommages(deja):
+def lister_hommages():
+    """Liste des avis des journaux romands, jour par jour (filtre date du site)."""
     base = "https://www.hommages.ch"
     avis, vus = [], set()
-    for n in range(1, 80):
-        r = get(f"{base}/fr/avis-de-deces" + (f"?page={n}" if n > 1 else ""))
-        if not r:
-            break
-        soup = BeautifulSoup(r.text, "html.parser")
-        items, vieux = 0, 0
-        for a in soup.select('a[href*="/avis-de-deces/"]'):
-            m = re.search(r"/fr/avis-de-deces/([a-z0-9\-]+)/?$", a["href"].split("?")[0])
-            if not m or m.group(1) in vus:
-                continue
-            vus.add(m.group(1))
-            bloc = a
-            for _ in range(6):
-                if bloc.parent is None:
-                    break
-                bloc = bloc.parent
-                t = bloc.get_text(" ", strip=True)
-                if re.search(r"\d{4}", t) and len(t) < 600:
-                    break
-            d = date_fr(bloc.get_text(" ", strip=True))
-            items += 1
-            if d and d < LIMITE:
-                vieux += 1
-                continue
-            lignes = [l.strip() for l in a.get_text("\n").split("\n") if l.strip()]
-            nom = next((l for l in lignes if not re.search(r"\d|publication|avis|bougie", l, re.I)), m.group(1))
-            avis.append({"source": "hommages", "slug": m.group(1), "nom": nom,
-                         "url": urljoin(base, a["href"]), "date_publication": d})
-        print(f" hommages page {n}: {items} avis, {vieux} anciens")
-        if items == 0 or (vieux and vieux == items):
-            break
-        time.sleep(PAUSE)
-    # lecture des avis (journal + image -> OCR)
-    for k, a in enumerate(avis, 1):
-        if a["slug"] in deja:
-            a["_skip"] = True
-            continue
-        r = get(a["url"])
-        time.sleep(PAUSE)
-        if not r:
-            continue
-        soup = BeautifulSoup(r.text, "html.parser")
-        corps = soup.get_text(" ", strip=True)
-        a["journaux"] = [j for j in JOURNAUX if j.lower() in corps.lower()]
-        a["date_publication"] = a["date_publication"] or date_fr(corps)
-        if not set(a["journaux"]) & JOURNAUX_OCR:
-            continue
-        srcs = [img.get("src") or img.get("data-src") or "" for img in soup.find_all("img")]
-        srcs = [urljoin(a["url"], s) for s in srcs if "/print/" in s]
-        textes = []
-        for s in srcs[:3]:
-            ri = get(s)
-            if ri:
-                textes.append(ocr(ri.content))
-        a["texte"] = "\n".join(textes)[:20000]
-        if k % 20 == 0:
-            print(f"  {k}/{len(avis)} avis hommages lus")
+    jour = DATE_FIN
+    while jour >= DATE_DEBUT:
+        d = jour.isoformat()
+        nb_jour = 0
+        for n in range(1, 30):
+            url = f"{base}/fr/avis-de-deces?published_in=fr&date_from={d}&date_to={d}" + (f"&page={n}" if n > 1 else "")
+            r = get(url)
+            if not r:
+                print(f"   {d} page {n}: échec, on passe")
+                break
+            soup = BeautifulSoup(r.text, "html.parser")
+            nouveaux = 0
+            for a in soup.select('ul li a[href*="/avis-de-deces/"]'):
+                m = re.search(r"/fr/avis-de-deces/([a-z0-9\-]+)/?$", a["href"].split("?")[0])
+                if not m or m.group(1) in vus:
+                    continue
+                vus.add(m.group(1))
+                titre = a.select_one("div.text-xl") or a
+                nom = titre.get_text(" ", strip=True)
+                avis.append({"source": "hommages", "slug": m.group(1), "nom": nom,
+                             "url": urljoin(base, a["href"]), "date_publication": jour})
+                nouveaux += 1
+            nb_jour += nouveaux
+            time.sleep(PAUSE)
+            if nouveaux == 0 or not soup.select_one(f'a[href*="page={n + 1}"]'):
+                break
+        print(f" hommages {d}: {nb_jour} avis")
+        jour -= dt.timedelta(days=1)
     return avis
 
 
-def funere(deja):
+def lire_hommages(a):
+    r = get(a["url"])
+    time.sleep(PAUSE)
+    if not r:
+        return a
+    soup = BeautifulSoup(r.text, "html.parser")
+    corps = soup.get_text(" ", strip=True)
+    a["journaux"] = [j for j in JOURNAUX if j.lower() in corps.lower()]
+    srcs = [img.get("src") or img.get("data-src") or "" for img in soup.find_all("img")]
+    srcs = [urljoin(a["url"], s) for s in srcs if "/print/" in s]
+    textes = []
+    for s in srcs[:3]:
+        ri = get(s)
+        if ri:
+            textes.append(ocr(ri.content))
+    a["texte"] = "\n".join(textes)[:20000]
+    return a
+
+
+def parse_funere(html, vus):
     base = "https://www.funere.com"
-    avis, vus = [], set()
-    for n in range(1, 25):
-        r = get(f"{base}/ch-fr/avis-de-deces/geneve" + (f"?page={n}" if n > 1 else ""))
-        if not r:
-            break
-        soup = BeautifulSoup(r.text, "html.parser")
-        items, vieux = 0, 0
-        for a in soup.select('a[href*="/avis-de-deces/geneve/"]'):
-            href = a["href"].split("?")[0]
-            m = re.search(r"/avis-de-deces/geneve/([a-z0-9\-]+)/([a-z0-9\-]+)/?$", href)
-            if not m or m.group(2) in vus:
-                continue
-            vus.add(m.group(2))
-            bloc = a
-            for _ in range(5):
-                t = bloc.get_text(" · ", strip=True)
-                if " ans" in t and len(t) < 500:
-                    break
-                if bloc.parent is None:
-                    break
-                bloc = bloc.parent
+    soup = BeautifulSoup(html, "html.parser")
+    out = []
+    for a in soup.select('a[href*="/avis-de-deces/geneve/"]'):
+        href = a["href"].split("?")[0]
+        m = re.search(r"/avis-de-deces/geneve/([a-z0-9\-]+)/([a-z0-9\-]+)/?$", href)
+        if not m or m.group(2) in vus:
+            continue
+        vus.add(m.group(2))
+        bloc = a
+        for _ in range(5):
             t = bloc.get_text(" · ", strip=True)
-            d = date_fr(t)
-            items += 1
-            if d and d < LIMITE:
-                vieux += 1
-                continue
-            ans = re.findall(r"(19\d{2}|20\d{2})", m.group(2))
-            age = re.search(r"(\d{1,3})\s*ans", t)
-            nom = next((x.strip() for x in t.split("·") if x.strip() and not re.search(r"\d", x)), m.group(2))
-            com = re.search(r"·\s*([A-ZÀ-Ý][^·]*?),\s*GE", t)
-            avis.append({"source": "funere", "slug": m.group(2), "nom": nom, "url": urljoin(base, href),
-                         "date_deces": d, "date_publication": AUJ if m.group(2) not in deja else None,
-                         "age": int(age.group(1)) if age else None,
-                         "commune": com.group(1).strip() if com else m.group(1).replace("-", " ").title(),
-                         "texte": "", "annee_naissance": int(ans[0]) if len(ans) >= 2 else None})
-        print(f" funere page {n}: {items} avis, {vieux} anciens")
-        if items == 0 or (vieux and vieux == items):
-            break
-        time.sleep(PAUSE)
+            if " ans" in t and len(t) < 500:
+                break
+            if bloc.parent is None:
+                break
+            bloc = bloc.parent
+        t = bloc.get_text(" · ", strip=True)
+        age = re.search(r"(\d{1,3})\s*ans", t)
+        nom = next((x.strip() for x in t.split("·") if x.strip() and not re.search(r"\d", x)), m.group(2))
+        com = re.search(r"·\s*([A-ZÀ-Ý][^·]*?),\s*GE", t)
+        out.append({"source": "funere", "slug": m.group(2), "nom": nom, "url": urljoin(base, href),
+                    "date_deces": date_fr(t), "date_publication": AUJ, "age": int(age.group(1)) if age else None,
+                    "commune": com.group(1).strip() if com else m.group(1).replace("-", " ").title(), "texte": ""})
+    return out
+
+
+def lister_funere():
+    """funere.com est protégé (Vercel) : on passe par un vrai navigateur."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("funere : playwright absent")
+        return []
+    avis, vus = [], set()
+    with sync_playwright() as pw:
+        nav = pw.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
+        page = nav.new_page(locale="fr-CH", user_agent=WEB.headers["User-Agent"], viewport={"width": 1300, "height": 900})
+        for n in range(1, 25):
+            url = "https://www.funere.com/ch-fr/avis-de-deces/geneve" + (f"?page={n}" if n > 1 else "")
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_selector('a[href*="/avis-de-deces/geneve/"]', timeout=45000)
+            except Exception as e:
+                debug("funere_playwright", f"page {n}: {e} — titre: {page.title()}")
+                break
+            lot = parse_funere(page.content(), vus)
+            anciens = [x for x in lot if x["date_deces"] and x["date_deces"] < DATE_DEBUT]
+            avis += [x for x in lot if x not in anciens]
+            print(f" funere page {n}: {len(lot)} avis, {len(anciens)} anciens")
+            if not lot or len(anciens) == len(lot):
+                break
+            time.sleep(PAUSE)
+        nav.close()
     return avis
 
 
@@ -395,30 +401,22 @@ def mail(nouvelles):
 
 # ------------------------------------------------------------ main
 def main():
-    passage = sb_insert("passages", {"source": "hommages+funere", "statut": "en cours"})
+    passage = sb_insert("passages", {"source": ("rattrapage " if os.environ.get("RATTRAPAGE") == "1" else "") + f"{DATE_DEBUT:%d.%m} → {DATE_FIN:%d.%m.%Y}", "statut": "en cours"})
     if os.environ.get("DIAGNOSTIC") == "1":
         diagnostic_hommages()
         diagnostic_funere()
     try:
         base = Base()
-        existants = sb_get_all("avis", "source,slug", f"&lu_le=gte.{(AUJ - dt.timedelta(days=JOURS + 10)).isoformat()}")
+        existants = sb_get_all("avis", "source,slug")
         deja = defaultdict(set)
         for e in existants:
             deja[e["source"]].add(e["slug"])
-        tous = []
-        for nom_src, fn in (("hommages", hommages), ("funere", funere)):
-            try:
-                lot = fn(deja[nom_src])
-                print(f"{nom_src}: {len(lot)} avis")
-                tous += lot
-            except Exception as e:
-                traceback.print_exc()
-                print(f"Source {nom_src} en erreur: {e}")
-        nouveaux = [a for a in tous if not a.get("_skip") and a["slug"] not in deja[a["source"]]]
+        print(f"Période : {DATE_DEBUT} -> {DATE_FIN} — {len(existants)} avis déjà en base")
         cols = ["source", "slug", "nom", "url", "date_publication", "date_deces", "age", "commune", "journaux", "texte"]
-        nouvelles, nb_c = [], 0
-        for i in range(0, len(nouveaux), 50):
-            lot = nouveaux[i:i + 50]
+        nouvelles, nb_c, nb_vus, nb_nouv = [], 0, 0, 0
+
+        def traiter(lot):
+            nonlocal nb_c
             enreg = sb_upsert("avis", [{c: a.get(c) for c in cols} for a in lot], "source,slug")
             ids = {(e["source"], e["slug"]): e["id"] for e in enreg}
             corr = []
@@ -429,6 +427,36 @@ def main():
                     nouvelles.append({**c, "avis_nom": a["nom"]})
             sb_upsert("correspondances", corr, "avis_id,proprietaire_id", ignorer=True, retour=False)
             nb_c += len(corr)
+
+        for nom_src, lister, lire in (("hommages", lister_hommages, lire_hommages), ("funere", lister_funere, None)):
+            if nom_src == "funere" and os.environ.get("SANS_FUNERE") == "1":
+                continue
+            try:
+                liste = lister()
+            except Exception as e:
+                traceback.print_exc()
+                debug(f"erreur_{nom_src}", str(e))
+                continue
+            nb_vus += len(liste)
+            a_faire = [a for a in liste if a["slug"] not in deja[nom_src]]
+            nb_nouv += len(a_faire)
+            print(f"{nom_src}: {len(liste)} avis, {len(a_faire)} nouveaux")
+            lot = []
+            for k, a in enumerate(a_faire, 1):
+                if lire:
+                    try:
+                        lire(a)
+                    except Exception as e:
+                        print("   lecture impossible", a["slug"], e)
+                lot.append(a)
+                if len(lot) >= 25:
+                    traiter(lot)
+                    lot = []
+                    print(f"  {k}/{len(a_faire)} enregistrés")
+            if lot:
+                traiter(lot)
+        nouveaux = [None] * nb_nouv
+        tous = [None] * nb_vus
         # noms des propriétaires pour le mail
         if nouvelles:
             ids = ",".join(str(c["proprietaire_id"]) for c in nouvelles)
@@ -436,7 +464,8 @@ def main():
                     requests.get(f"{SB_URL}/rest/v1/proprietaires?select=id,nom,prenoms&id=in.({ids})", headers=SB).json()}
             for c in nouvelles:
                 c["prop"] = noms.get(c["proprietaire_id"], "?")
-            mail(sorted(nouvelles, key=lambda c: -c["score"]))
+            if os.environ.get("RATTRAPAGE") != "1":
+                mail(sorted(nouvelles, key=lambda c: -c["score"]))
         msg = f"{len(tous)} avis vus, {len(nouveaux)} nouveaux, {nb_c} correspondances"
         print(msg)
         sb_patch("passages", passage["id"], {"fin": dt.datetime.utcnow().isoformat() + "Z", "nb_avis": len(nouveaux),

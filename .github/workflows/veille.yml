@@ -8,14 +8,26 @@ on:
       jours:
         description: "Nombre de jours à analyser"
         default: "3"
+      rattrapage_mois:
+        description: "Rattrapage historique : nombre de mois (0 = non)"
+        default: "0"
       diagnostic:
         description: "Diagnostic (1 = oui)"
         default: "0"
 
+env:
+  SUPABASE_URL: https://wpnsxibjsstnvroovehm.supabase.co
+  SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+  GMAIL_USER: ${{ secrets.GMAIL_USER }}
+  GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+  MAIL_TO: ${{ secrets.MAIL_TO }}
+  SITE_URL: ${{ vars.SITE_URL }}
+
 jobs:
   veille:
+    if: github.event_name == 'schedule' || github.event.inputs.rattrapage_mois == '0'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,15 +36,43 @@ jobs:
       - name: Installer OCR
         run: sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-fra tesseract-ocr-deu
       - name: Dépendances
-        run: pip install -q -r robot/requirements.txt
+        run: pip install -q -r robot/requirements.txt && python -m playwright install --with-deps chromium
       - name: Lancer la veille
         env:
-          SUPABASE_URL: https://wpnsxibjsstnvroovehm.supabase.co
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           JOURS: ${{ github.event.inputs.jours || '3' }}
           DIAGNOSTIC: ${{ github.event.inputs.diagnostic || '0' }}
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          MAIL_TO: ${{ secrets.MAIL_TO }}
-          SITE_URL: ${{ vars.SITE_URL }}
         run: python robot/veille.py
+
+  rattrapage:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.rattrapage_mois != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        mois: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    steps:
+      - name: Mois hors période ?
+        id: garde
+        run: |
+          if [ ${{ matrix.mois }} -gt ${{ github.event.inputs.rattrapage_mois }} ]; then echo "skip=1" >> $GITHUB_OUTPUT; fi
+      - uses: actions/checkout@v4
+        if: steps.garde.outputs.skip != '1'
+      - uses: actions/setup-python@v5
+        if: steps.garde.outputs.skip != '1'
+        with:
+          python-version: "3.12"
+      - name: Installer
+        if: steps.garde.outputs.skip != '1'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-fra tesseract-ocr-deu
+          pip install -q -r robot/requirements.txt
+      - name: Rattrapage du mois ${{ matrix.mois }}
+        if: steps.garde.outputs.skip != '1'
+        run: |
+          export DATE_FIN=$(date -d "-$(( (${{ matrix.mois }} - 1) * 30 )) days" +%F)
+          export DATE_DEBUT=$(date -d "-$(( ${{ matrix.mois }} * 30 - 1 )) days" +%F)
+          export RATTRAPAGE=1
+          export SANS_FUNERE=1
+          python robot/veille.py
