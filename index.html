@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="rf.js"></script>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--ink:#1b2430;--mute:#6b7685;--line:#e3e7ec;--brand:#1f3a5f;--brand2:#2d5486;
 --hi:#b4232c;--hi-bg:#fdecee;--mid:#a86200;--mid-bg:#fff4e0;--lo:#4b5a6b;--lo-bg:#eef1f4;--ok:#1e7a46;--ok-bg:#e6f5ec}
@@ -60,6 +61,12 @@ th{background:#eef1f5;font-size:12px;color:var(--mute);font-weight:600}
 .vide{text-align:center;color:var(--mute);padding:40px}
 .cache{display:none!important}
 @media (max-width:900px){.piste{grid-template-columns:52px 1fr}.piste .suivi{grid-column:1/-1}.piste>div:nth-child(3){grid-column:2}}
+.vente{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px;display:grid;grid-template-columns:170px 1fr 1fr 230px;gap:14px}
+.vente.ecarte{opacity:.55}
+.prix{font-size:19px;font-weight:700}
+.tag.her{background:var(--hi-bg);color:var(--hi)}.tag.don{background:var(--mid-bg);color:var(--mid)}.tag.soc{background:#e8eefb;color:#2d4f8f}
+textarea.coller{width:100%;min-height:120px;font-size:12px}
+@media (max-width:900px){.vente{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -77,6 +84,7 @@ th{background:#eef1f5;font-size:12px;color:var(--mute);font-weight:600}
   <h1>Veille décès × propriétaires — Genève</h1>
   <nav>
     <button data-v="pistes" class="on">Pistes</button>
+    <button data-v="ventes">Ventes RF</button>
     <button data-v="avis">Avis</button>
     <button data-v="base">Base</button>
     <button data-v="import">Import Popety</button>
@@ -99,6 +107,28 @@ th{background:#eef1f5;font-size:12px;color:var(--mute);font-weight:600}
     <button class="btn sec" onclick="chargerPistes()">Actualiser</button>
   </div>
   <div id="listePistes"></div>
+</section>
+
+<section id="v-ventes" class="cache">
+  <div class="carte">
+    <div class="lbl">Importer des publications foncières</div>
+    <p class="mute" style="margin-top:0">Sur <a href="https://publications-foncieres.app.ge.ch/?resultsPerPage=50" target="_blank">publications-foncieres.app.ge.ch</a> :
+      Cmd+A puis Cmd+C sur la page, et coller ici. On peut coller plusieurs pages à la suite. Les avis déjà importés sont mis à jour, sans toucher aux statuts ni aux notes.</p>
+    <textarea class="coller" id="rfTexte" placeholder="Coller ici le contenu de la page…"></textarea>
+    <div class="barre" style="margin:8px 0 0"><button class="btn" onclick="importerRF()">Analyser et enregistrer</button><span id="rfEtat" class="mute"></span></div>
+  </div>
+  <div class="stats" id="statsVentes"></div>
+  <div class="barre">
+    <select id="vOp"><option value="">Toutes opérations</option><option>Achat</option><option>Héritage</option><option>Donation</option><option value="autres">Autres</option></select>
+    <select id="vType"><option value="">Terrain + PPE</option><option value="B-F">Terrain / maison (B-F)</option><option value="PPE">PPE</option></select>
+    <select id="vCommune"><option value="">Toutes communes</option></select>
+    <select id="vBase"><option value="">Toutes</option><option value="1">Parcelles de ma base</option></select>
+    <select id="vStatut"><option value="actifs">Hors écartés</option><option value="">Tous statuts</option><option>nouveau</option><option>à suivre</option><option>contacté</option><option>écarté</option></select>
+    <input id="vPrixMin" type="number" placeholder="Prix min" style="width:110px">
+    <input type="search" id="vTexte" placeholder="Nom, adresse, parcelle…">
+    <select id="vTri"><option value="date">Plus récentes</option><option value="prix">Prix ↓</option><option value="m2">Prix/m² ↓</option><option value="detention">Détention ↓</option></select>
+  </div>
+  <div id="listeVentes"></div>
 </section>
 
 <section id="v-avis" class="cache">
@@ -187,7 +217,7 @@ function ouvrir(user){
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
   document.querySelectorAll("main section").forEach(s => s.classList.toggle("cache", s.id !== "v-" + b.dataset.v));
-  ({ pistes:chargerPistes, avis:chargerAvis, base:statsBase, robot:chargerPassages })[b.dataset.v]?.();
+  ({ pistes:chargerPistes, ventes:chargerVentes, avis:chargerAvis, base:statsBase, robot:chargerPassages })[b.dataset.v]?.();
 });
 
 async function chargerCommunes(){
@@ -367,6 +397,101 @@ async function importer(files){
     etat(`<b>Import terminé</b> — ${fnum(total)} parcelles, ${fnum(lignesO.length)} propriétaires personnes physiques` +
       (ignores ? ` — ${ignores} fichier(s) ignoré(s) (pas un export Popety)` : ""));
   } catch (e) { etat(`<span class="err">Erreur : ${esc(e.message)}</span> — relancer l'import, les parcelles déjà envoyées seront simplement mises à jour.`); }
+}
+
+// ---------------- ventes registre foncier
+let VENTES = [];
+const chf = n => n == null ? "" : "CHF " + Math.round(n).toLocaleString("fr-CH");
+async function importerRF(){
+  const t = $("rfTexte").value;
+  const lot = RF.parse(t);
+  if (!lot.length) { $("rfEtat").textContent = "Aucun avis reconnu dans le texte collé."; return; }
+  $("rfEtat").textContent = `${lot.length} avis reconnus — enregistrement…`;
+  const lignes = lot.map(v => ({ affaire:v.affaire, date_acte:v.date_acte, date_publication:v.date_publication, rectification_du:v.rectification_du,
+    communes:v.communes, operations:v.operations, prix:v.prix, frais_annexes:v.frais_annexes, prix_m2:v.prix_m2, surface_terrain:v.surface_terrain,
+    anciens:v.anciens, nouveaux:v.nouveaux, heritiers:v.heritiers, defunt:v.defunt, heritage:v.heritage, acheteur_societe:v.acheteur_societe,
+    vendeur_societe:v.vendeur_societe, detention_annees:v.detention_annees, type_principal:v.type_principal, adresse:v.adresse,
+    description:v.description, immeubles:v.immeubles, texte:v.texte }));
+  for (let i = 0; i < lignes.length; i += 200) {
+    const { error } = await sb.from("ventes").upsert(lignes.slice(i, i + 200), { onConflict:"affaire" });
+    if (error) { $("rfEtat").innerHTML = `<span class="err">Erreur : ${esc(error.message)}</span>`; return; }
+  }
+  const { data:n } = await sb.rpc("rattacher_ventes");
+  const her = lot.filter(v => v.heritage).length, ach = lot.filter(v => v.operations.includes("Achat")).length;
+  $("rfEtat").innerHTML = `<b>${lot.length} avis enregistrés</b> — ${ach} achats, ${her} héritages — ${n || 0} rattaché(s) à ta base`;
+  $("rfTexte").value = "";
+  chargerVentes();
+}
+async function chargerVentes(){
+  $("listeVentes").innerHTML = '<div class="vide">Chargement…</div>';
+  const { data, error } = await sb.from("ventes").select("*").order("date_acte", { ascending:false, nullsFirst:false }).limit(3000);
+  if (error) { $("listeVentes").innerHTML = `<div class="vide">${esc(error.message)}</div>`; return; }
+  VENTES = data;
+  const communes = [...new Set(data.flatMap(v => v.communes || []))].sort();
+  $("vCommune").innerHTML = '<option value="">Toutes communes</option>' + communes.map(c => `<option>${esc(c)}</option>`).join("");
+  afficherVentes();
+}
+["vOp","vType","vCommune","vBase","vStatut","vTri"].forEach(id => $(id).onchange = afficherVentes);
+["vTexte","vPrixMin"].forEach(id => $(id).oninput = afficherVentes);
+function mediane(a){ if (!a.length) return null; a = [...a].sort((x,y) => x-y); return a[Math.floor(a.length/2)]; }
+function afficherVentes(){
+  const op = $("vOp").value, ty = $("vType").value, co = $("vCommune").value, ba = $("vBase").value, st = $("vStatut").value,
+        pm = +$("vPrixMin").value || 0, q = sansAcc($("vTexte").value), tri = $("vTri").value;
+  const PRINC = ["Achat","Héritage","Donation"];
+  let l = VENTES.filter(v => {
+    const ops = v.operations || [];
+    return (!op || (op === "autres" ? !ops.some(o => PRINC.includes(o)) : ops.includes(op))) &&
+      (!ty || v.type_principal === ty) && (!co || (v.communes || []).includes(co)) && (!ba || (v.parcelle_ids || []).length) &&
+      (!st || (st === "actifs" ? v.statut !== "écarté" : v.statut === st)) && (!pm || (v.prix || 0) >= pm) &&
+      (!q || sansAcc(v.texte).includes(q));
+  });
+  const k = { date: v => v.date_acte || "", prix: v => v.prix || 0, m2: v => v.prix_m2 || 0, detention: v => v.detention_annees || 0 }[tri];
+  l.sort((a,b) => k(a) < k(b) ? 1 : k(a) > k(b) ? -1 : 0);
+  const achatsBF = l.filter(v => v.prix_m2);
+  $("statsVentes").innerHTML = [["Avis", l.length], ["Achats", l.filter(v => (v.operations||[]).includes("Achat")).length],
+    ["Héritages", l.filter(v => v.heritage).length], ["Dans ma base", l.filter(v => (v.parcelle_ids||[]).length).length],
+    ["Prix médian terrain", achatsBF.length ? chf(mediane(achatsBF.map(v => +v.prix_m2))) + "/m²" : "—"]]
+    .map(([a,b]) => `<div class="stat"><b>${b}</b><span>${a}</span></div>`).join("");
+  if (!l.length) { $("listeVentes").innerHTML = '<div class="vide">Aucun avis. Colle une page des publications foncières ci-dessus.</div>'; return; }
+  $("listeVentes").innerHTML = l.slice(0, 400).map(v => {
+    const ops = (v.operations || []).map(o => `<span class="tag ${/Héritage/.test(o) ? "her" : /Donation/.test(o) ? "don" : ""}">${esc(o)}</span>`).join("");
+    const imm = (v.immeubles || []);
+    const immTxt = imm.slice(0, 4).map(i => `${esc(i.type)} ${esc(i.commune)} ${esc(i.feuille)}/${esc(i.numero)}${i.lot ? "-" + esc(i.lot) : ""}${i.surface ? " · " + fnum(i.surface) + " m²" : ""}`).join("<br>") + (imm.length > 4 ? `<br>+ ${imm.length - 4} autre(s)` : "");
+    const dansBase = (v.parcelle_ids || []).length;
+    return `<div class="vente ${v.statut === "écarté" ? "ecarte" : ""}">
+      <div>
+        <div class="lbl">${fdate(v.date_acte)}</div>
+        <div class="nom">${esc((v.communes || []).join(", "))}</div>
+        <div>${ops}${v.acheteur_societe ? '<span class="tag soc">Acheteur société</span>' : ""}${dansBase ? '<span class="tag com">Dans ma base</span>' : ""}</div>
+        <div class="prix" style="margin-top:6px">${v.prix ? chf(v.prix) : '<span class="mute">sans prix</span>'}</div>
+        ${v.prix_m2 ? `<div class="mute">${chf(v.prix_m2)}/m² terrain</div>` : ""}
+      </div>
+      <div>
+        <div class="lbl">${v.heritage ? "Défunt" : "Ancien(s) propriétaire(s)"}</div>
+        <div>${esc(v.heritage && v.defunt ? v.defunt : (v.anciens || "").replace(/,?\s*inscrit (dès )?le \d{2}\.\d{2}\.\d{4}/g, ""))}</div>
+        ${v.detention_annees != null ? `<div class="mute">Détenu ${String(v.detention_annees).replace(".", ",")} ans</div>` : ""}
+        <div class="lbl" style="margin-top:8px">${v.heritiers ? "Héritiers" : "Nouveau(x)"}</div>
+        <div>${esc(v.heritiers || v.nouveaux)}</div>
+      </div>
+      <div>
+        <div class="lbl">Bien</div>
+        <div class="mute">${immTxt}</div>
+        <div style="margin-top:4px">${esc(v.adresse || "")}</div>
+        <div class="mute">${esc(v.description || "")}</div>
+        <div class="liens" style="margin-top:6px"><a href="https://publications-foncieres.app.ge.ch/?search=${encodeURIComponent(v.affaire)}" target="_blank">Affaire ${esc(v.affaire)}</a></div>
+      </div>
+      <div class="suivi">
+        <div class="lbl">Suivi</div>
+        <select onchange="majVente(${v.id},{statut:this.value})">${["nouveau","à suivre","contacté","écarté"].map(s => `<option ${s===v.statut?"selected":""}>${s}</option>`).join("")}</select>
+        <textarea placeholder="Notes…" onchange="majVente(${v.id},{notes:this.value})">${esc(v.notes)}</textarea>
+      </div>
+    </div>`; }).join("") + (l.length > 400 ? `<div class="vide">${l.length - 400} avis de plus — affine les filtres.</div>` : "");
+}
+async function majVente(id, champs){
+  const { error } = await sb.from("ventes").update(champs).eq("id", id);
+  if (error) return alert("Erreur : " + error.message);
+  Object.assign(VENTES.find(v => v.id === id), champs);
+  if ("statut" in champs) afficherVentes();
 }
 
 // ---------------- robot
