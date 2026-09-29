@@ -422,9 +422,10 @@ async function ligneTx(r){
 function ligneTxV2(r){
   const det = String(r["Description"] || ""), date = dateISO(r["Date"]), prec = dateISO(r["Transaction précédente"]);
   const prix = numCH(r["Prix"]) || null, surface = numCH(r["Surface"]) || null, pm2 = numCH(r["Prix/m²"]) || null;
-  let commune = null, feuille = null, numero = null;
+  let commune = null, feuille = null, numero = null, m2 = null;
   const m = det.match(/\b(B-F|PPE|COP|DDP)\s+([^,]+?),\s*(\d+)\/(\d+)/);
   if (m) { commune = m[2].trim(); feuille = m[3]; numero = m[4]; }
+  else if ((m2 = det.match(/(?:Bien-fonds|Unité de PPE|Part de copropriété|Droit distinct et permanent)\s+([^/,]+?)\s*\/\s*(\d+)/))) { commune = m2[1].trim(); numero = m2[2]; }
   else {
     const c = det.match(/Commune et lieu:\s*([^,|]+)/), p = det.match(/Parcelle:\s*(\d+)/), f = det.match(/Feuille:\s*(\d+)/);
     commune = c ? c[1].trim() : null; numero = p ? p[1] : null; feuille = f ? f[1] : null;
