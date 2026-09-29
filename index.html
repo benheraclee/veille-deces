@@ -84,6 +84,7 @@ textarea.coller{width:100%;min-height:120px;font-size:12px}
   <h1>Veille décès × propriétaires — Genève</h1>
   <nav>
     <button data-v="pistes" class="on">Pistes</button>
+    <button data-v="her">Héritages</button>
     <button data-v="tx">Transactions</button>
     <button data-v="avis">Avis</button>
     <button data-v="base">Base</button>
@@ -107,6 +108,24 @@ textarea.coller{width:100%;min-height:120px;font-size:12px}
     <button class="btn sec" onclick="chargerPistes()">Actualiser</button>
   </div>
   <div id="listePistes"></div>
+</section>
+
+<section id="v-her" class="cache">
+  <p class="mute" style="margin-top:0">Terrains et maisons (bien-fonds) dont la <b>dernière</b> transaction est un héritage : les héritiers sont toujours propriétaires, rien n'a été revendu depuis.</p>
+  <div class="stats" id="statsHer"></div>
+  <div class="barre">
+    <select id="hAge"><option value="1">Moins d'1 an</option><option value="2">Moins de 2 ans</option><option value="5" selected>Moins de 5 ans</option><option value="10">Moins de 10 ans</option><option value="99">Tout</option></select>
+    <select id="hCommune"><option value="">Toutes communes</option></select>
+    <select id="hType"><option value="">B-F + copropriété</option><option value="B-F">Bien-fonds entier</option><option value="COP">Part de copropriété</option></select>
+    <input id="hSurfMin" type="number" placeholder="Surface min m²" style="width:130px">
+    <input id="hSurfMax" type="number" placeholder="Surface max m²" style="width:130px">
+    <select id="hNb"><option value="1">Tous</option><option value="2">2 héritiers ou plus</option><option value="3">3 ou plus</option></select>
+    <select id="hBase"><option value="">Toutes parcelles</option><option value="1">Parcelles de ma base</option></select>
+    <select id="hStatut"><option value="actifs">Hors écartés</option><option value="">Tous statuts</option><option>nouveau</option><option>à suivre</option><option>contacté</option><option>écarté</option></select>
+    <input type="search" id="hQ" placeholder="Nom, adresse…">
+    <select id="hTri"><option value="date">Plus récents</option><option value="surface">Surface ↓</option><option value="nb">Nb héritiers ↓</option></select>
+  </div>
+  <div id="listeHer"></div>
 </section>
 
 <section id="v-tx" class="cache">
@@ -226,7 +245,7 @@ function ouvrir(user){
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
   document.querySelectorAll("main section").forEach(s => s.classList.toggle("cache", s.id !== "v-" + b.dataset.v));
-  ({ pistes:chargerPistes, tx:ouvrirTx, avis:chargerAvis, base:statsBase, robot:chargerPassages })[b.dataset.v]?.();
+  ({ pistes:chargerPistes, her:chargerHer, tx:ouvrirTx, avis:chargerAvis, base:statsBase, robot:chargerPassages })[b.dataset.v]?.();
 });
 
 async function chargerCommunes(){
@@ -406,6 +425,59 @@ async function importer(files){
     etat(`<b>Import terminé</b> — ${fnum(total)} parcelles, ${fnum(lignesO.length)} propriétaires personnes physiques` +
       (ignores ? ` — ${ignores} fichier(s) ignoré(s) (pas un export Popety)` : ""));
   } catch (e) { etat(`<span class="err">Erreur : ${esc(e.message)}</span> — relancer l'import, les parcelles déjà envoyées seront simplement mises à jour.`); }
+}
+
+// ---------------- héritages (dernière transaction = héritage)
+let HER = null;
+async function chargerHer(){
+  if (!HER) {
+    $("listeHer").innerHTML = '<div class="vide">Chargement…</div>';
+    const { data, error } = await sb.from("v_heritages").select("*").order("date_heritage", { ascending:false }).limit(10000);
+    if (error) { $("listeHer").innerHTML = `<div class="vide">${esc(error.message)}</div>`; return; }
+    HER = data;
+    $("hCommune").innerHTML = '<option value="">Toutes communes</option>' + [...new Set(data.map(h => h.commune))].sort().map(c => `<option>${esc(c)}</option>`).join("");
+  }
+  afficherHer();
+}
+["hAge","hCommune","hType","hNb","hBase","hStatut","hTri"].forEach(id => $(id).onchange = afficherHer);
+["hSurfMin","hSurfMax","hQ"].forEach(id => $(id).oninput = afficherHer);
+const sansFeu = t => String(t || "").replace(/\bFeu\s+/g, "");
+function afficherHer(){
+  if (!HER) return;
+  const age = +$("hAge").value, co = $("hCommune").value, ty = $("hType").value, smin = +$("hSurfMin").value || 0, smax = +$("hSurfMax").value || 0,
+        nb = +$("hNb").value, ba = $("hBase").value, st = $("hStatut").value, q = sansAcc($("hQ").value), tri = $("hTri").value;
+  const l = HER.filter(h => h.annees_depuis <= age && (!co || h.commune === co) && (!ty || h.type === ty) &&
+      (!smin || (h.surface || 0) >= smin) && (!smax || (h.surface || 0) <= smax) && h.nb_heritiers >= nb &&
+      (!ba || h.parcelle_id) && (!st || (st === "actifs" ? h.statut !== "écarté" : h.statut === st)) &&
+      (!q || sansAcc([h.heritiers, h.defunt, h.adresse, h.commune].join(" ")).includes(q)))
+    .sort((a,b) => tri === "surface" ? (b.surface || 0) - (a.surface || 0) : tri === "nb" ? b.nb_heritiers - a.nb_heritiers || (b.surface||0) - (a.surface||0) : String(b.date_heritage).localeCompare(String(a.date_heritage)));
+  $("statsHer").innerHTML = [["Parcelles", fnum(l.length)], ["Dans ma base", fnum(l.filter(h => h.parcelle_id).length)],
+    ["2 héritiers ou plus", fnum(l.filter(h => h.nb_heritiers >= 2).length)], ["Surface totale", fnum(l.reduce((a,h) => a + (+h.surface || 0), 0)) + " m²"]]
+    .map(([a,b]) => `<div class="stat"><b>${b}</b><span>${a}</span></div>`).join("");
+  if (!l.length) { $("listeHer").innerHTML = '<div class="vide">Aucune parcelle avec ces filtres.</div>'; return; }
+  $("listeHer").innerHTML = `<table><tr><th>Héritage</th><th>Parcelle</th><th>Défunt → héritiers</th><th>Dernier prix connu</th><th>Suivi</th></tr>` +
+    l.slice(0, 500).map(h => `<tr>
+      <td>${fdate(h.date_heritage)}<div class="mute">il y a ${String(h.annees_depuis).replace(".", ",")} an(s)</div><span class="tag her">${esc(h.raison)}</span></td>
+      <td><b>${esc(h.commune)}</b> n° ${esc(h.numero)}${h.type === "COP" ? ' <span class="tag">part COP</span>' : ""}
+        <div>${esc(h.adresse || "")}</div><div class="mute">${h.surface ? fnum(h.surface) + " m²" : ""}${h.zone ? " · zone " + esc(h.zone) : ""}</div>
+        ${h.parcelle_id ? '<span class="tag com">Dans ma base</span>' : ""}</td>
+      <td><div class="mute">${esc(sansFeu(h.defunt))}</div><div>→ <b>${esc(h.heritiers || "")}</b></div>
+        <div class="mute">${h.nb_heritiers} héritier(s)</div></td>
+      <td>${h.dernier_prix ? `<b>${chf(h.dernier_prix)}</b><div class="mute">${fdate(h.date_dernier_prix)}</div>` : '<span class="mute">—</span>'}
+        <div class="liens"><a href="#" onclick="histoParcelle('${esc(h.commune)}','${esc(h.numero)}');return false">Historique</a></div></td>
+      <td style="min-width:130px"><select onchange="majHer(${h.id},{statut:this.value})">${["nouveau","à suivre","contacté","écarté"].map(x => `<option ${x===h.statut?"selected":""}>${x}</option>`).join("")}</select>
+        <textarea placeholder="Notes…" style="width:100%;margin-top:4px;font-size:12px" onchange="majHer(${h.id},{notes:this.value})">${esc(h.notes)}</textarea></td></tr>`).join("") +
+    "</table>" + (l.length > 500 ? `<div class="vide">${l.length - 500} de plus — affine les filtres.</div>` : "");
+}
+async function majHer(id, champs){
+  const { error } = await sb.from("transactions").update(champs).eq("id", id);
+  if (error) return alert("Erreur : " + error.message);
+  Object.assign(HER.find(h => h.id === id), champs);
+  if ("statut" in champs) afficherHer();
+}
+function histoParcelle(commune, numero){
+  document.querySelector('nav button[data-v="tx"]').click();
+  setTimeout(() => { $("tCommune").value = commune; $("tQ").value = "/" + numero; $("tTri").value = "date_tx"; chargerTx(0); }, 300);
 }
 
 // ---------------- transactions Popety
