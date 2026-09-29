@@ -84,7 +84,7 @@ textarea.coller{width:100%;min-height:120px;font-size:12px}
   <h1>Veille décès × propriétaires — Genève</h1>
   <nav>
     <button data-v="pistes" class="on">Pistes</button>
-    <button data-v="ventes">Ventes RF</button>
+    <button data-v="tx">Transactions</button>
     <button data-v="avis">Avis</button>
     <button data-v="base">Base</button>
     <button data-v="import">Import Popety</button>
@@ -109,26 +109,35 @@ textarea.coller{width:100%;min-height:120px;font-size:12px}
   <div id="listePistes"></div>
 </section>
 
-<section id="v-ventes" class="cache">
-  <div class="carte">
-    <div class="lbl">Importer des publications foncières</div>
-    <p class="mute" style="margin-top:0">Sur <a href="https://publications-foncieres.app.ge.ch/?resultsPerPage=50" target="_blank">publications-foncieres.app.ge.ch</a> :
-      Cmd+A puis Cmd+C sur la page, et coller ici. On peut coller plusieurs pages à la suite. Les avis déjà importés sont mis à jour, sans toucher aux statuts ni aux notes.</p>
-    <textarea class="coller" id="rfTexte" placeholder="Coller ici le contenu de la page…"></textarea>
-    <div class="barre" style="margin:8px 0 0"><button class="btn" onclick="importerRF()">Analyser et enregistrer</button><span id="rfEtat" class="mute"></span></div>
-  </div>
-  <div class="stats" id="statsVentes"></div>
+<section id="v-tx" class="cache">
+  <div class="stats" id="statsTx"></div>
   <div class="barre">
-    <select id="vOp"><option value="">Toutes opérations</option><option>Achat</option><option>Héritage</option><option>Donation</option><option value="autres">Autres</option></select>
-    <select id="vType"><option value="">Terrain + PPE</option><option value="B-F">Terrain / maison (B-F)</option><option value="PPE">PPE</option></select>
-    <select id="vCommune"><option value="">Toutes communes</option></select>
-    <select id="vBase"><option value="">Toutes</option><option value="1">Parcelles de ma base</option></select>
-    <select id="vStatut"><option value="actifs">Hors écartés</option><option value="">Tous statuts</option><option>nouveau</option><option>à suivre</option><option>contacté</option><option>écarté</option></select>
-    <input id="vPrixMin" type="number" placeholder="Prix min" style="width:110px">
-    <input type="search" id="vTexte" placeholder="Nom, adresse, parcelle…">
-    <select id="vTri"><option value="date">Plus récentes</option><option value="prix">Prix ↓</option><option value="m2">Prix/m² ↓</option><option value="detention">Détention ↓</option></select>
+    <select id="tCommune"><option value="">Toutes communes</option></select>
+    <input id="tRue" placeholder="Rue (ex. Chemin des Tulipiers)" style="width:220px">
+    <input type="search" id="tQ" placeholder="Nom, acheteur, vendeur, détail…" style="width:220px">
+    <select id="tType"><option value="">Tous types</option><option value="B-F">Bien-fonds (terrain/maison)</option><option value="PPE">PPE</option><option value="COP">Copropriété</option><option value="DDP">DDP</option></select>
+    <select id="tRaison"><option value="">Toutes raisons</option></select>
   </div>
-  <div id="listeVentes"></div>
+  <div class="barre">
+    <label class="mute">Du <input id="tDu" type="date"></label>
+    <label class="mute">Au <input id="tAu" type="date"></label>
+    <input id="tPrixMin" type="number" placeholder="Prix min" style="width:110px">
+    <input id="tPrixMax" type="number" placeholder="Prix max" style="width:110px">
+    <select id="tBase"><option value="">Toutes parcelles</option><option value="1">Parcelles de ma base</option></select>
+    <select id="tTri"><option value="date_tx">Plus récentes</option><option value="prix">Prix ↓</option><option value="prix_m2">Prix/m² ↓</option><option value="detention_annees">Détention ↓</option></select>
+    <button class="btn" onclick="chargerTx(0)">Rechercher</button>
+    <button class="btn sec" onclick="exporterTx()">Exporter CSV</button>
+  </div>
+  <div id="listeTx"></div>
+  <div class="barre" id="pagesTx" style="justify-content:center;margin-top:10px"></div>
+  <div class="carte" style="margin-top:20px">
+    <div class="lbl">Importer des transactions Popety</div>
+    <p class="mute" style="margin-top:0">Popety → Explore → Transactions, filtre Canton Genève, <code>size=1000</code> dans l'adresse, tout cocher, Exporter.
+      Glisser ici autant de fichiers que voulu : les doublons sont ignorés.</p>
+    <div class="drop" id="dropTx">Déposer les exports de transactions .xlsx ici ou cliquer<input type="file" id="fichiersTx" multiple accept=".xlsx" class="cache"></div>
+    <div id="txEtat" class="mute" style="margin-top:12px"></div>
+    <div class="prog cache" id="progTx"><div></div></div>
+  </div>
 </section>
 
 <section id="v-avis" class="cache">
@@ -217,7 +226,7 @@ function ouvrir(user){
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
   document.querySelectorAll("main section").forEach(s => s.classList.toggle("cache", s.id !== "v-" + b.dataset.v));
-  ({ pistes:chargerPistes, ventes:chargerVentes, avis:chargerAvis, base:statsBase, robot:chargerPassages })[b.dataset.v]?.();
+  ({ pistes:chargerPistes, tx:ouvrirTx, avis:chargerAvis, base:statsBase, robot:chargerPassages })[b.dataset.v]?.();
 });
 
 async function chargerCommunes(){
@@ -399,99 +408,139 @@ async function importer(files){
   } catch (e) { etat(`<span class="err">Erreur : ${esc(e.message)}</span> — relancer l'import, les parcelles déjà envoyées seront simplement mises à jour.`); }
 }
 
-// ---------------- ventes registre foncier
-let VENTES = [];
+// ---------------- transactions Popety
 const chf = n => n == null ? "" : "CHF " + Math.round(n).toLocaleString("fr-CH");
-async function importerRF(){
-  const t = $("rfTexte").value;
-  const lot = RF.parse(t);
-  if (!lot.length) { $("rfEtat").textContent = "Aucun avis reconnu dans le texte collé."; return; }
-  $("rfEtat").textContent = `${lot.length} avis reconnus — enregistrement…`;
-  const lignes = lot.map(v => ({ affaire:v.affaire, date_acte:v.date_acte, date_publication:v.date_publication, rectification_du:v.rectification_du,
-    communes:v.communes, operations:v.operations, prix:v.prix, frais_annexes:v.frais_annexes, prix_m2:v.prix_m2, surface_terrain:v.surface_terrain,
-    anciens:v.anciens, nouveaux:v.nouveaux, heritiers:v.heritiers, defunt:v.defunt, heritage:v.heritage, acheteur_societe:v.acheteur_societe,
-    vendeur_societe:v.vendeur_societe, detention_annees:v.detention_annees, type_principal:v.type_principal, adresse:v.adresse,
-    description:v.description, immeubles:v.immeubles, texte:v.texte }));
-  for (let i = 0; i < lignes.length; i += 200) {
-    const { error } = await sb.from("ventes").upsert(lignes.slice(i, i + 200), { onConflict:"affaire" });
-    if (error) { $("rfEtat").innerHTML = `<span class="err">Erreur : ${esc(error.message)}</span>`; return; }
+const numCH = s => { if (s == null || s === "") return null; const n = Number(String(s).replace(/['’\s]/g, "").replace(",", ".")); return isNaN(n) ? null : n; };
+const dateISO = v => { if (!v) return null; if (v instanceof Date) return v.toISOString().slice(0,10); const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return m[0]; m = s.match(/^(\d{2})[./](\d{2})[./](\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
+const SOCIETE_TX = /\b(SA|SARL|SÀRL|AG|GMBH|SNC|SCI|LTD|INC|FONDATION|STIFTUNG|COOPERATIVE|COOPÉRATIVE|CAISSE|PENSIONSKASSE|HOLDING|IMMOBILI[EÈ]RE|INVEST\w*|FONDS|FUND|PROPERTIES|DEVELOPPEMENT|CONSTRUCTIONS?|COMMUNE|ETAT DE|CONFEDERATION)\b/;
+async function sha1(t){ const b = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(t)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2,"0")).join(""); }
+async function ligneTx(r){
+  const det = r["Détails"] || "", date = dateISO(r["Date"]), prec = dateISO(r["Prec.Trans."]), prix = numCH(r["Prix"]);
+  const m = det.match(/\b(B-F|PPE|COP|DDP)\s+([^,]+?),\s*(\d+)\/(\d+)/);
+  const commune = m ? m[2].trim() : null;
+  const surf = det.match(/,\s*([\d'’]+)\s*m2/);
+  const surface = surf ? numCH(surf[1]) : null;
+  const adr = String(r["Adresse"] || "").split(";").map(x => x.trim()).find(x => /\d{4}\s+\S/.test(x)) || "";
+  const pc = String(r["Parcelles"] || "").match(/(?:(\d+)\/)?(\d+)/);
+  const ma = adr.match(/^(.*?)\s+\d+[\w.]*\s*,\s*\d{4}\s+(.+)$/);
+  const type = r["Type"] || (m ? m[1] : null);
+  const l = { ajoute_le: dateISO(r["Ajouté le"]), date_tx: date, type, raison: r["Raison"] || null, prix,
+    acheteurs: r["Acheteurs"] || null, vendeurs: r["Vendeurs"] || null, details: det || null, prec_date: prec,
+    detention_annees: prec && date ? Math.round((new Date(date) - new Date(prec)) / 3.15576e10 * 10) / 10 : null,
+    adresse: adr || null, rue: ma ? ma[1].trim() : null, localite: ma ? ma[2].trim() : null, parcelles: r["Parcelles"] ? String(r["Parcelles"]) : null,
+    commune, commune_popety: commune ? RF.communePopety(commune) : null, feuille: m ? m[3] : (pc && pc[1]) || null, numero: m ? m[4] : (pc && pc[2]) || null,
+    surface, prix_m2: type === "B-F" && prix && surface && /achat|kauf|acquisition|vente/i.test(r["Raison"] || "") && prix / surface >= 200 ? Math.round(prix / surface) : null,
+    acheteur_societe: SOCIETE_TX.test(r["Acheteurs"] || "") };
+  l.recherche = sansAcc([l.acheteurs, l.vendeurs, l.details, l.adresse, l.raison].join(" | "));
+  l.cle = await sha1([l.date_tx, l.type, l.raison, l.prix, l.acheteurs, l.vendeurs, l.details].join("|"));
+  return l;
+}
+const dropTx = $("dropTx");
+dropTx.onclick = () => $("fichiersTx").click();
+dropTx.ondragover = e => { e.preventDefault(); dropTx.classList.add("sur"); };
+dropTx.ondragleave = () => dropTx.classList.remove("sur");
+dropTx.ondrop = e => { e.preventDefault(); dropTx.classList.remove("sur"); importerTx([...e.dataTransfer.files]); };
+$("fichiersTx").onchange = e => importerTx([...e.target.files]);
+async function importerTx(files){
+  files = files.filter(f => /\.xlsx$/i.test(f.name)); if (!files.length) return;
+  const etat = t => $("txEtat").innerHTML = t, prog = $("progTx"), barre = prog.firstElementChild;
+  prog.classList.remove("cache"); barre.style.width = "0";
+  const lignes = new Map(); let ignores = 0;
+  for (const [i,f] of files.entries()) {
+    etat(`Lecture ${i+1}/${files.length} : ${esc(f.name)}`);
+    const wb = XLSX.read(await f.arrayBuffer(), { cellDates:true });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:null, raw:false, dateNF:"yyyy-mm-dd" });
+    if (!rows.length || !("Acheteurs" in rows[0])) { ignores++; continue; }
+    for (const r of rows) { const l = await ligneTx(r); lignes.set(l.cle, l); }
   }
-  const { data:n } = await sb.rpc("rattacher_ventes");
-  const her = lot.filter(v => v.heritage).length, ach = lot.filter(v => v.operations.includes("Achat")).length;
-  $("rfEtat").innerHTML = `<b>${lot.length} avis enregistrés</b> — ${ach} achats, ${her} héritages — ${n || 0} rattaché(s) à ta base`;
-  $("rfTexte").value = "";
-  chargerVentes();
+  const tout = [...lignes.values()];
+  etat(`${fnum(tout.length)} transactions distinctes — envoi…`);
+  try {
+    for (let i = 0; i < tout.length; i += 500) {
+      const { error } = await sb.from("transactions").upsert(tout.slice(i, i + 500), { onConflict:"cle", ignoreDuplicates:true });
+      if (error) throw error;
+      barre.style.width = (100 * Math.min(i + 500, tout.length) / tout.length) + "%";
+      etat(`Envoi : ${fnum(Math.min(i + 500, tout.length))} / ${fnum(tout.length)}`);
+    }
+    const { data:n } = await sb.rpc("rattacher_transactions");
+    const { count } = await sb.from("transactions").select("id", { count:"exact", head:true });
+    etat(`<b>Import terminé</b> — ${fnum(tout.length)} transactions lues, ${fnum(n || 0)} nouvelles rattachées à ta base — <b>${fnum(count)}</b> transactions au total` +
+      (ignores ? ` — ${ignores} fichier(s) ignoré(s)` : ""));
+    chargerRaisons(); chargerTx(0);
+  } catch (e) { etat(`<span class="err">Erreur : ${esc(e.message)}</span> — relancer : les transactions déjà envoyées sont ignorées.`); }
 }
-async function chargerVentes(){
-  $("listeVentes").innerHTML = '<div class="vide">Chargement…</div>';
-  const { data, error } = await sb.from("ventes").select("*").order("date_acte", { ascending:false, nullsFirst:false }).limit(3000);
-  if (error) { $("listeVentes").innerHTML = `<div class="vide">${esc(error.message)}</div>`; return; }
-  VENTES = data;
-  const communes = [...new Set(data.flatMap(v => v.communes || []))].sort();
-  $("vCommune").innerHTML = '<option value="">Toutes communes</option>' + communes.map(c => `<option>${esc(c)}</option>`).join("");
-  afficherVentes();
+let txPage = 0; const TX_PAR_PAGE = 100; let txOuvert = false;
+function ouvrirTx(){ if (!txOuvert) { txOuvert = true; chargerRaisons(); $("tCommune").innerHTML = $("fCommune").innerHTML.replace("Toutes communes","Toutes communes"); } chargerTx(0); }
+async function chargerRaisons(){
+  const { data } = await sb.rpc("liste_raisons");
+  $("tRaison").innerHTML = '<option value="">Toutes raisons</option>' + (data || []).map(r => `<option value="${esc(r.raison)}">${esc(r.raison)} (${fnum(r.n)})</option>`).join("");
 }
-["vOp","vType","vCommune","vBase","vStatut","vTri"].forEach(id => $(id).onchange = afficherVentes);
-["vTexte","vPrixMin"].forEach(id => $(id).oninput = afficherVentes);
-function mediane(a){ if (!a.length) return null; a = [...a].sort((x,y) => x-y); return a[Math.floor(a.length/2)]; }
-function afficherVentes(){
-  const op = $("vOp").value, ty = $("vType").value, co = $("vCommune").value, ba = $("vBase").value, st = $("vStatut").value,
-        pm = +$("vPrixMin").value || 0, q = sansAcc($("vTexte").value), tri = $("vTri").value;
-  const PRINC = ["Achat","Héritage","Donation"];
-  let l = VENTES.filter(v => {
-    const ops = v.operations || [];
-    return (!op || (op === "autres" ? !ops.some(o => PRINC.includes(o)) : ops.includes(op))) &&
-      (!ty || v.type_principal === ty) && (!co || (v.communes || []).includes(co)) && (!ba || (v.parcelle_ids || []).length) &&
-      (!st || (st === "actifs" ? v.statut !== "écarté" : v.statut === st)) && (!pm || (v.prix || 0) >= pm) &&
-      (!q || sansAcc(v.texte).includes(q));
-  });
-  const k = { date: v => v.date_acte || "", prix: v => v.prix || 0, m2: v => v.prix_m2 || 0, detention: v => v.detention_annees || 0 }[tri];
-  l.sort((a,b) => k(a) < k(b) ? 1 : k(a) > k(b) ? -1 : 0);
-  const achatsBF = l.filter(v => v.prix_m2);
-  $("statsVentes").innerHTML = [["Avis", l.length], ["Achats", l.filter(v => (v.operations||[]).includes("Achat")).length],
-    ["Héritages", l.filter(v => v.heritage).length], ["Dans ma base", l.filter(v => (v.parcelle_ids||[]).length).length],
-    ["Prix médian terrain", achatsBF.length ? chf(mediane(achatsBF.map(v => +v.prix_m2))) + "/m²" : "—"]]
+function filtresTx(){
+  return { commune: $("tCommune").value || null, rue: $("tRue").value.trim() || null, q: sansAcc($("tQ").value.trim()) || null,
+    type: $("tType").value || null, raison: $("tRaison").value || null, du: $("tDu").value || null, au: $("tAu").value || null,
+    pmin: numCH($("tPrixMin").value), pmax: numCH($("tPrixMax").value), base: $("tBase").value ? true : null };
+}
+function requeteTx(f, sel = "*"){
+  let q = sb.from("transactions").select(sel);
+  if (f.commune) q = q.eq("commune_popety", f.commune);
+  if (f.rue) q = q.ilike("adresse", `%${f.rue}%`);
+  if (f.q) q = q.ilike("recherche", `%${f.q}%`);
+  if (f.type) q = q.eq("type", f.type);
+  if (f.raison) q = q.eq("raison", f.raison);
+  if (f.du) q = q.gte("date_tx", f.du);
+  if (f.au) q = q.lte("date_tx", f.au);
+  if (f.pmin != null) q = q.gte("prix", f.pmin);
+  if (f.pmax != null) q = q.lte("prix", f.pmax);
+  if (f.base) q = q.not("parcelle_id", "is", null);
+  return q;
+}
+["tCommune","tType","tRaison","tBase","tTri","tDu","tAu"].forEach(id => $(id).onchange = () => chargerTx(0));
+["tRue","tQ","tPrixMin","tPrixMax"].forEach(id => $(id).addEventListener("keydown", e => e.key === "Enter" && chargerTx(0)));
+async function chargerTx(page){
+  txPage = page; const f = filtresTx(), tri = $("tTri").value;
+  $("listeTx").innerHTML = '<div class="vide">Recherche…</div>';
+  const [liste, stats] = await Promise.all([
+    requeteTx(f).order(tri, { ascending:false, nullsFirst:false }).order("id", { ascending:false }).range(page * TX_PAR_PAGE, page * TX_PAR_PAGE + TX_PAR_PAGE - 1),
+    sb.rpc("stats_transactions", { f_commune:f.commune, f_rue:f.rue, f_q:f.q, f_type:f.type, f_raison:f.raison, f_du:f.du, f_au:f.au,
+      f_prix_min:f.pmin, f_prix_max:f.pmax, f_base:f.base })]);
+  if (liste.error) { $("listeTx").innerHTML = `<div class="vide">${esc(liste.error.message)}</div>`; return; }
+  const s = stats.data || {};
+  $("statsTx").innerHTML = [["Transactions", fnum(s.n)], ["Prix médian", s.prix_median ? chf(s.prix_median) : "—"],
+    ["Prix médian au m² de parcelle (B-F)", s.prix_m2_median ? chf(s.prix_m2_median) + "/m²" : "—"], ["Volume", s.volume ? chf(s.volume) : "—"]]
     .map(([a,b]) => `<div class="stat"><b>${b}</b><span>${a}</span></div>`).join("");
-  if (!l.length) { $("listeVentes").innerHTML = '<div class="vide">Aucun avis. Colle une page des publications foncières ci-dessus.</div>'; return; }
-  $("listeVentes").innerHTML = l.slice(0, 400).map(v => {
-    const ops = (v.operations || []).map(o => `<span class="tag ${/Héritage/.test(o) ? "her" : /Donation/.test(o) ? "don" : ""}">${esc(o)}</span>`).join("");
-    const imm = (v.immeubles || []);
-    const immTxt = imm.slice(0, 4).map(i => `${esc(i.type)} ${esc(i.commune)} ${esc(i.feuille)}/${esc(i.numero)}${i.lot ? "-" + esc(i.lot) : ""}${i.surface ? " · " + fnum(i.surface) + " m²" : ""}`).join("<br>") + (imm.length > 4 ? `<br>+ ${imm.length - 4} autre(s)` : "");
-    const dansBase = (v.parcelle_ids || []).length;
-    return `<div class="vente ${v.statut === "écarté" ? "ecarte" : ""}">
-      <div>
-        <div class="lbl">${fdate(v.date_acte)}</div>
-        <div class="nom">${esc((v.communes || []).join(", "))}</div>
-        <div>${ops}${v.acheteur_societe ? '<span class="tag soc">Acheteur société</span>' : ""}${dansBase ? '<span class="tag com">Dans ma base</span>' : ""}</div>
-        <div class="prix" style="margin-top:6px">${v.prix ? chf(v.prix) : '<span class="mute">sans prix</span>'}</div>
-        ${v.prix_m2 ? `<div class="mute">${chf(v.prix_m2)}/m² terrain</div>` : ""}
-      </div>
-      <div>
-        <div class="lbl">${v.heritage ? "Défunt" : "Ancien(s) propriétaire(s)"}</div>
-        <div>${esc(v.heritage && v.defunt ? v.defunt : (v.anciens || "").replace(/,?\s*inscrit (dès )?le \d{2}\.\d{2}\.\d{4}/g, ""))}</div>
-        ${v.detention_annees != null ? `<div class="mute">Détenu ${String(v.detention_annees).replace(".", ",")} ans</div>` : ""}
-        <div class="lbl" style="margin-top:8px">${v.heritiers ? "Héritiers" : "Nouveau(x)"}</div>
-        <div>${esc(v.heritiers || v.nouveaux)}</div>
-      </div>
-      <div>
-        <div class="lbl">Bien</div>
-        <div class="mute">${immTxt}</div>
-        <div style="margin-top:4px">${esc(v.adresse || "")}</div>
-        <div class="mute">${esc(v.description || "")}</div>
-        <div class="liens" style="margin-top:6px"><a href="https://publications-foncieres.app.ge.ch/?search=${encodeURIComponent(v.affaire)}" target="_blank">Affaire ${esc(v.affaire)}</a></div>
-      </div>
-      <div class="suivi">
-        <div class="lbl">Suivi</div>
-        <select onchange="majVente(${v.id},{statut:this.value})">${["nouveau","à suivre","contacté","écarté"].map(s => `<option ${s===v.statut?"selected":""}>${s}</option>`).join("")}</select>
-        <textarea placeholder="Notes…" onchange="majVente(${v.id},{notes:this.value})">${esc(v.notes)}</textarea>
-      </div>
-    </div>`; }).join("") + (l.length > 400 ? `<div class="vide">${l.length - 400} avis de plus — affine les filtres.</div>` : "");
+  const l = liste.data;
+  if (!l.length) { $("listeTx").innerHTML = '<div class="vide">Aucune transaction. Importe tes exports Popety en bas de page.</div>'; $("pagesTx").innerHTML = ""; return; }
+  $("listeTx").innerHTML = `<table><tr><th>Date</th><th>Raison</th><th>Prix</th><th>Bien</th><th>Vendeur(s)</th><th>Acheteur(s)</th><th>Suivi</th></tr>` + l.map(t => `<tr>
+    <td>${fdate(t.date_tx)}<div class="mute">${esc(t.commune || "")}</div></td>
+    <td><span class="tag ${/h[ée]ritage|succession/i.test(t.raison||"") ? "her" : /donation/i.test(t.raison||"") ? "don" : ""}">${esc(t.raison || "")}</span><div class="mute">${esc(t.type || "")}</div></td>
+    <td><b>${t.prix ? chf(t.prix) : "—"}</b>${t.prix_m2 ? `<div class="mute">${chf(t.prix_m2)}/m²</div>` : ""}</td>
+    <td>${esc(t.adresse ? t.adresse.split(";")[0] : "")}<div class="mute">${t.feuille ? esc(t.feuille + "/" + t.numero) : ""}${t.surface ? " · " + fnum(t.surface) + " m²" : ""}</div>
+      ${t.parcelle_id ? '<span class="tag com">Dans ma base</span>' : ""}</td>
+    <td>${esc(t.vendeurs || "")}${t.detention_annees != null ? `<div class="mute">détenu ${String(t.detention_annees).replace(".", ",")} ans</div>` : ""}</td>
+    <td>${esc(t.acheteurs || "")}${t.acheteur_societe ? ' <span class="tag soc">société</span>' : ""}</td>
+    <td style="min-width:130px"><select onchange="majTx(${t.id},{statut:this.value})">${["nouveau","à suivre","contacté","écarté"].map(x => `<option ${x===t.statut?"selected":""}>${x}</option>`).join("")}</select>
+      <textarea placeholder="Notes…" style="width:100%;margin-top:4px;font-size:12px" onchange="majTx(${t.id},{notes:this.value})">${esc(t.notes)}</textarea></td></tr>`).join("") + "</table>";
+  const nPages = Math.ceil((s.n || 0) / TX_PAR_PAGE);
+  $("pagesTx").innerHTML = nPages > 1 ? `<button class="btn sec" ${page ? "" : "disabled"} onclick="chargerTx(${page-1})">←</button>
+    <span class="mute">Page ${page+1} / ${fnum(nPages)}</span><button class="btn sec" ${page+1 < nPages ? "" : "disabled"} onclick="chargerTx(${page+1})">→</button>` : "";
 }
-async function majVente(id, champs){
-  const { error } = await sb.from("ventes").update(champs).eq("id", id);
-  if (error) return alert("Erreur : " + error.message);
-  Object.assign(VENTES.find(v => v.id === id), champs);
-  if ("statut" in champs) afficherVentes();
+async function majTx(id, champs){
+  const { error } = await sb.from("transactions").update(champs).eq("id", id);
+  if (error) alert("Erreur : " + error.message);
+}
+async function exporterTx(){
+  const f = filtresTx(), tri = $("tTri").value, cols = ["date_tx","commune","raison","type","prix","prix_m2","surface","adresse","rue","feuille","numero","vendeurs","acheteurs","prec_date","detention_annees","details","statut","notes"];
+  let tout = [];
+  for (let p = 0; p < 50; p++) {
+    const { data, error } = await requeteTx(f, cols.join(",")).order(tri, { ascending:false, nullsFirst:false }).order("id", { ascending:false }).range(p*1000, p*1000+999);
+    if (error) return alert(error.message);
+    tout = tout.concat(data); if (data.length < 1000) break;
+  }
+  const csv = [cols.join(";")].concat(tout.map(r => cols.map(c => `"${String(r[c] ?? "").replace(/"/g,'""')}"`).join(";"))).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type:"text/csv" }));
+  a.download = `transactions_${new Date().toISOString().slice(0,10)}.csv`; a.click();
 }
 
 // ---------------- robot
