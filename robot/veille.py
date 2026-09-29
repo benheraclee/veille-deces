@@ -250,6 +250,11 @@ def analyser(base, avis):
         elif p["commune"] and f" {' '.join(p['commune'])} " in texte_t:
             cc = " ".join(p["commune"])
         sc += (15 if cc else 0) + {"haute": 5, "moyenne": 0}.get(p["prio"], -15)
+        journaux = avis.get("journaux") or []
+        if "Tribune de Genève" in journaux or avis.get("source") == "funere":
+            sc += 10
+        elif avis.get("source") == "hommages" and not cc:
+            sc -= 10
         out.append({"proprietaire_id": p["id"], "niveau": niv, "score": max(0, min(100, sc)),
                     "extrait": extrait[:300], "commune_citee": cc or None})
     return out
