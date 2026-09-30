@@ -557,7 +557,7 @@ async function importerTx(files){
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:null, raw:true });
     if (!rows.length || !("Acheteurs" in rows[0])) { ignores++; continue; }
     if ("Popety.io ID" in rows[0]) nbV2++; else nbV1++;
-    for (const r of rows) { const l = await ligneTx(r); lignes.set(l.cle, l); }
+    for (const r of rows) { const l = await ligneTx(r); delete l.details; lignes.set(l.cle, l); }
   }
   const tout = [...lignes.values()];
   etat(`${fnum(tout.length)} transactions distinctes — envoi…`);
@@ -646,7 +646,7 @@ async function majTx(id, champs){
   if (error) alert("Erreur : " + error.message);
 }
 async function exporterTx(){
-  const f = filtresTx(), tri = $("tTri").value, cols = ["date_tx","commune","raison","type","prix","prix_m2","surface","adresse","rue","feuille","numero","vendeurs","acheteurs","prec_date","detention_annees","details","statut","notes"];
+  const f = filtresTx(), tri = $("tTri").value, cols = ["date_tx","commune","raison","type","prix","prix_m2","surface","adresse","rue","feuille","numero","vendeurs","acheteurs","prec_date","detention_annees","statut","notes"];
   let tout = [];
   for (let p = 0; p < 60; p++) {
     const { data, error } = await listeTx(f, tri, p*1000, 1000, cols.join(","));
