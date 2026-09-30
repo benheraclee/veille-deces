@@ -132,7 +132,8 @@ textarea.coller{width:100%;min-height:120px;font-size:12px}
   <div class="stats" id="statsTx"></div>
   <div class="barre">
     <select id="tCommune"><option value="">Toutes communes</option></select>
-    <input id="tRue" placeholder="Rue (ex. Chemin des Tulipiers)" style="width:220px">
+    <input id="tRue" placeholder="Rue ou adresse (ex. Chemin des Tulipiers)" style="width:250px">
+    <select id="tRayon"><option value="0">Rue seule</option><option value="50">+ 50 m autour</option><option value="100">+ 100 m autour</option><option value="200">+ 200 m autour</option><option value="500">+ 500 m autour</option><option value="1000">+ 1 km autour</option></select>
     <input type="search" id="tQ" placeholder="Nom, acheteur, vendeur, détail…" style="width:220px">
     <select id="tType"><option value="">Tous types</option><option value="B-F">Bien-fonds (terrain/maison)</option><option value="PPE">PPE</option><option value="COP">Copropriété</option><option value="DDP">DDP</option></select>
     <select id="tRaison"><option value="">Toutes raisons</option></select>
@@ -583,33 +584,24 @@ async function chargerRaisons(){
 function filtresTx(){
   return { commune: $("tCommune").value || null, rue: $("tRue").value.trim() || null, q: sansAcc($("tQ").value.trim()) || null,
     type: $("tType").value || null, raison: $("tRaison").value || null, du: $("tDu").value || null, au: $("tAu").value || null,
-    pmin: numCH($("tPrixMin").value), pmax: numCH($("tPrixMax").value), base: $("tBase").value ? true : null };
+    pmin: numCH($("tPrixMin").value), pmax: numCH($("tPrixMax").value), base: $("tBase").value ? true : null,
+    rayon: +$("tRayon").value || 0 };
 }
-function requeteTx(f, sel = "*"){
-  let q = sb.from("transactions").select(sel);
-  if (f.commune) q = q.eq("commune_popety", f.commune);
-  if (f.rue) q = q.ilike("adresse", `%${f.rue}%`);
-  if (f.q) q = q.ilike("recherche", `%${f.q}%`);
-  if (f.type) q = q.eq("type", f.type);
-  if (f.raison) q = q.eq("raison", f.raison);
-  if (f.du) q = q.gte("date_tx", f.du);
-  if (f.au) q = q.lte("date_tx", f.au);
-  if (f.pmin != null) q = q.gte("prix", f.pmin);
-  if (f.pmax != null) q = q.lte("prix", f.pmax);
-  if (f.base) q = q.not("parcelle_id", "is", null);
-  return q;
+function argsTx(f){
+  return { f_commune:f.commune, f_rue:f.rue, f_rayon:f.rayon, f_q:f.q, f_type:f.type, f_raison:f.raison, f_du:f.du, f_au:f.au,
+    f_prix_min:f.pmin, f_prix_max:f.pmax, f_base:f.base };
 }
-["tCommune","tType","tRaison","tBase","tTri","tDu","tAu"].forEach(id => $(id).onchange = () => chargerTx(0));
+["tCommune","tType","tRaison","tBase","tTri","tDu","tAu","tRayon"].forEach(id => $(id).onchange = () => chargerTx(0));
 ["tRue","tQ","tPrixMin","tPrixMax"].forEach(id => $(id).addEventListener("keydown", e => e.key === "Enter" && chargerTx(0)));
 async function chargerTx(page){
   txPage = page; const f = filtresTx(), tri = $("tTri").value;
   $("listeTx").innerHTML = '<div class="vide">Recherche…</div>';
   const [liste, stats] = await Promise.all([
-    requeteTx(f).order(tri, { ascending:false, nullsFirst:false }).order("id", { ascending:false }).range(page * TX_PAR_PAGE, page * TX_PAR_PAGE + TX_PAR_PAGE - 1),
-    sb.rpc("stats_transactions", { f_commune:f.commune, f_rue:f.rue, f_q:f.q, f_type:f.type, f_raison:f.raison, f_du:f.du, f_au:f.au,
-      f_prix_min:f.pmin, f_prix_max:f.pmax, f_base:f.base })]);
+    sb.rpc("tx_liste", { ...argsTx(f), f_tri:tri, f_offset:page * TX_PAR_PAGE, f_limit:TX_PAR_PAGE }),
+    sb.rpc("tx_stats", argsTx(f))]);
   if (liste.error) { $("listeTx").innerHTML = `<div class="vide">${esc(liste.error.message)}</div>`; return; }
   const s = stats.data || {};
+  if (f.rue && f.rayon && s.zone_trouvee === false) { $("listeTx").innerHTML = `<div class="vide">« ${esc(f.rue)} » introuvable dans le registre des adresses${f.commune ? " de " + esc(f.commune) : ""}. Vérifie l'orthographe (ex. « Chemin des Tulipiers ») ou enlève la commune.</div>`; $("statsTx").innerHTML = ""; $("pagesTx").innerHTML = ""; return; }
   $("statsTx").innerHTML = [["Transactions", fnum(s.n)], ["Prix médian", s.prix_median ? chf(s.prix_median) : "—"],
     ["Prix médian au m² de parcelle (B-F)", s.prix_m2_median ? chf(s.prix_m2_median) + "/m²" : "—"], ["Volume", s.volume ? chf(s.volume) : "—"]]
     .map(([a,b]) => `<div class="stat"><b>${b}</b><span>${a}</span></div>`).join("");
@@ -636,8 +628,8 @@ async function majTx(id, champs){
 async function exporterTx(){
   const f = filtresTx(), tri = $("tTri").value, cols = ["date_tx","commune","raison","type","prix","prix_m2","surface","adresse","rue","feuille","numero","vendeurs","acheteurs","prec_date","detention_annees","details","statut","notes"];
   let tout = [];
-  for (let p = 0; p < 50; p++) {
-    const { data, error } = await requeteTx(f, cols.join(",")).order(tri, { ascending:false, nullsFirst:false }).order("id", { ascending:false }).range(p*1000, p*1000+999);
+  for (let p = 0; p < 60; p++) {
+    const { data, error } = await sb.rpc("tx_liste", { ...argsTx(f), f_tri:tri, f_offset:p*1000, f_limit:1000 });
     if (error) return alert(error.message);
     tout = tout.concat(data); if (data.length < 1000) break;
   }
