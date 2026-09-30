@@ -1,0 +1,22 @@
+name: Géocodage adresses
+
+on:
+  push:
+    paths:
+      - robot/geocodage.py
+  workflow_dispatch:
+
+jobs:
+  geo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q requests
+      - env:
+          SUPABASE_URL: https://wpnsxibjsstnvroovehm.supabase.co
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python robot/geocodage.py
