@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - robot/geocodage.py
+      - robot/geocoder_transactions.py
   workflow_dispatch:
 
 jobs:
@@ -19,4 +20,4 @@ jobs:
       - env:
           SUPABASE_URL: https://wpnsxibjsstnvroovehm.supabase.co
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python robot/geocodage.py
+        run: python robot/geocoder_transactions.py
