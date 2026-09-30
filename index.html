@@ -587,6 +587,25 @@ function filtresTx(){
     pmin: numCH($("tPrixMin").value), pmax: numCH($("tPrixMax").value), base: $("tBase").value ? true : null,
     rayon: +$("tRayon").value || 0 };
 }
+function requeteTx(f, sel = "*"){
+  let q = sb.from("transactions").select(sel);
+  if (f.commune) q = q.eq("commune_popety", f.commune);
+  if (f.rue) q = q.ilike("adresse", `%${f.rue}%`);
+  if (f.q) q = q.ilike("recherche", `%${f.q}%`);
+  if (f.type) q = q.eq("type", f.type);
+  if (f.raison) q = q.eq("raison", f.raison);
+  if (f.du) q = q.gte("date_tx", f.du);
+  if (f.au) q = q.lte("date_tx", f.au);
+  if (f.pmin != null) q = q.gte("prix", f.pmin);
+  if (f.pmax != null) q = q.lte("prix", f.pmax);
+  if (f.base) q = q.not("parcelle_id", "is", null);
+  return q;
+}
+const zoneTx = f => f.rue && f.rayon > 0;
+function listeTx(f, tri, offset, limit, sel = "*"){
+  if (zoneTx(f)) return sb.rpc("tx_liste", { ...argsTx(f), f_tri:tri, f_offset:offset, f_limit:limit }).select(sel);
+  return requeteTx(f, sel).order(tri, { ascending:false, nullsFirst:false }).order("id", { ascending:false }).range(offset, offset + limit - 1);
+}
 function argsTx(f){
   return { f_commune:f.commune, f_rue:f.rue, f_rayon:f.rayon, f_q:f.q, f_type:f.type, f_raison:f.raison, f_du:f.du, f_au:f.au,
     f_prix_min:f.pmin, f_prix_max:f.pmax, f_base:f.base };
@@ -597,7 +616,7 @@ async function chargerTx(page){
   txPage = page; const f = filtresTx(), tri = $("tTri").value;
   $("listeTx").innerHTML = '<div class="vide">Recherche…</div>';
   const [liste, stats] = await Promise.all([
-    sb.rpc("tx_liste", { ...argsTx(f), f_tri:tri, f_offset:page * TX_PAR_PAGE, f_limit:TX_PAR_PAGE }),
+    listeTx(f, tri, page * TX_PAR_PAGE, TX_PAR_PAGE),
     sb.rpc("tx_stats", argsTx(f))]);
   if (liste.error) { $("listeTx").innerHTML = `<div class="vide">${esc(liste.error.message)}</div>`; return; }
   const s = stats.data || {};
@@ -629,7 +648,7 @@ async function exporterTx(){
   const f = filtresTx(), tri = $("tTri").value, cols = ["date_tx","commune","raison","type","prix","prix_m2","surface","adresse","rue","feuille","numero","vendeurs","acheteurs","prec_date","detention_annees","details","statut","notes"];
   let tout = [];
   for (let p = 0; p < 60; p++) {
-    const { data, error } = await sb.rpc("tx_liste", { ...argsTx(f), f_tri:tri, f_offset:p*1000, f_limit:1000 });
+    const { data, error } = await listeTx(f, tri, p*1000, 1000, cols.join(","));
     if (error) return alert(error.message);
     tout = tout.concat(data); if (data.length < 1000) break;
   }
