@@ -569,6 +569,7 @@ async function importerTx(files){
       etat(`Envoi : ${fnum(Math.min(i + 500, tout.length))} / ${fnum(tout.length)}`);
     }
     const { data:n } = await sb.rpc("rattacher_transactions");
+    etat("Géolocalisation des nouvelles transactions…"); await sb.rpc("geocoder_nouveaux");
     const { count } = await sb.from("transactions").select("id", { count:"exact", head:true });
     etat(`<b>Import terminé</b> — ${fnum(tout.length)} transactions lues, ${fnum(n || 0)} nouvelles rattachées à ta base — <b>${fnum(count)}</b> transactions au total` +
       (ignores ? ` — ${ignores} fichier(s) ignoré(s)` : ""));
